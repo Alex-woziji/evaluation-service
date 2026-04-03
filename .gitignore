@@ -1,0 +1,30 @@
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+*.log
+
+**/ai-campaign-itcr-ui/
+agents.tar.gz
+frontend-sourcecode.tar.gz
