@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -31,7 +30,7 @@ class EvalResult:
     eval_latency_ms: int
     reasoning: Optional[str] = None
     raw_output: Optional[Dict[str, Any]] = None
-    # Populated by llm_judge for background persistence
+    # Populated by llm_judge for persistence
     llm_call_data: Optional[List[Dict[str, Any]]] = None
 
 

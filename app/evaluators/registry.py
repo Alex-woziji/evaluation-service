@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging
 from typing import Dict, List, Optional, Type
 
@@ -13,7 +12,7 @@ class EvaluatorRegistry:
         self._registry: Dict[str, BaseEvaluator] = {}
 
     def register(self, cls: Type[BaseEvaluator]) -> Type[BaseEvaluator]:
-        """Class decorator — registers an evaluator instance keyed by metric_type."""
+        """Class decorator to register an evaluator."""
         if not cls.metric_type:
             raise ValueError(f"{cls.__name__} must define a non-empty metric_type")
         instance = cls()
