@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Dict, Optional
 from uuid import UUID
 
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EvalLog
@@ -27,35 +26,35 @@ async def upsert_eval_log(
     retry_count: int = 0,
     eval_latency_ms: Optional[int] = None,
 ) -> None:
-    stmt = (
-        insert(EvalLog)
-        .values(
-            id=eval_id,
-            metric_type=metric_type,
-            status=status,
-            score=score,
-            scores_detail=scores_detail,
-            reasoning=reasoning,
-            error_type=error_type,
-            error_message=error_message,
-            retry_count=retry_count,
-            eval_latency_ms=eval_latency_ms,
-            evaluated_at=evaluated_at,
+    eval_id_str = str(eval_id)
+
+    existing = await session.get(EvalLog, eval_id_str)
+    if existing is None:
+        session.add(
+            EvalLog(
+                id=eval_id_str,
+                metric_type=metric_type,
+                status=status,
+                score=score,
+                scores_detail=scores_detail,
+                reasoning=reasoning,
+                error_type=error_type,
+                error_message=error_message,
+                retry_count=retry_count,
+                eval_latency_ms=eval_latency_ms,
+                evaluated_at=evaluated_at,
+            )
         )
-        .on_conflict_do_update(
-            index_elements=["id"],
-            set_={
-                "status": status,
-                "score": score,
-                "scores_detail": scores_detail,
-                "reasoning": reasoning,
-                "error_type": error_type,
-                "error_message": error_message,
-                "retry_count": retry_count,
-                "eval_latency_ms": eval_latency_ms,
-                "evaluated_at": evaluated_at,
-            },
-        )
-    )
-    await session.execute(stmt)
+    else:
+        existing.metric_type = metric_type
+        existing.status = status
+        existing.score = score
+        existing.scores_detail = scores_detail
+        existing.reasoning = reasoning
+        existing.error_type = error_type
+        existing.error_message = error_message
+        existing.retry_count = retry_count
+        existing.eval_latency_ms = eval_latency_ms
+        existing.evaluated_at = evaluated_at
+
     await session.commit()

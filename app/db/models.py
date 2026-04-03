@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     Float,
@@ -13,8 +14,6 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func
 
@@ -26,11 +25,11 @@ class Base(DeclarativeBase):
 class EvalLog(Base):
     __tablename__ = "eval_log"
 
-    id = Column(PGUUID(as_uuid=True), primary_key=True)  # = eval_id passed in by scheduler
+    id = Column(String(36), primary_key=True)  # = eval_id passed in by scheduler
     metric_type = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False)  # "success" | "failed"
     score = Column(Float, nullable=True)
-    scores_detail = Column(JSONB, nullable=True)
+    scores_detail = Column(JSON, nullable=True)
     reasoning = Column(Text, nullable=True)
     error_type = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
@@ -46,14 +45,12 @@ class EvalLog(Base):
 class LLMCallLog(Base):
     __tablename__ = "llm_call_log"
 
-    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    eval_log_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("eval_log.id"), nullable=False
-    )
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    eval_log_id = Column(String(36), ForeignKey("eval_log.id"), nullable=False)
     judge_model = Column(String(128), nullable=False)
     prompt_system = Column(Text, nullable=True)
     prompt_user = Column(Text, nullable=True)
-    raw_response = Column(JSONB, nullable=True)
+    raw_response = Column(JSON, nullable=True)
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
     llm_latency_ms = Column(Integer, nullable=True)

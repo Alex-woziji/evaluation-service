@@ -24,7 +24,8 @@ ENV/
 *.swo
 
 *.log
-
+**/**.db
+.claude
 **/ai-campaign-itcr-ui/
 agents.tar.gz
 frontend-sourcecode.tar.gz

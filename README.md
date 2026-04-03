@@ -10,14 +10,14 @@ LLM 评估平台的指标计算层。职责单一：接收单条 record，执行
 
 ```bash
 # 安装依赖
-pip install -e ".[dev]"
+pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 填写 DATABASE_URL、OPENAI_API_KEY 等
+# 填写 DB_BACKEND、SQLITE_DB_PATH、OPENAI_API_KEY 等
 
-# 运行数据库迁移
-alembic upgrade head
+# 初始化本地 SQLite（仅 DB_BACKEND=local 时需要）
+python -m app.db
 
 # 启动服务
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -48,7 +48,10 @@ evaluation-service/
 │   │   └── response.py              # EvaluateResponse / ErrorResponse
 │   ├── db/
 │   │   ├── models.py                # SQLAlchemy ORM：EvalLog · LLMCallLog
-│   │   ├── connection.py            # 异步引擎 + AsyncSessionLocal
+│   │   ├── connection.py            # 本地 SQLite / Azure DB 连接选择
+│   │   ├── init_db.py               # 本地 SQLite 初始化脚本
+│   │   ├── __main__.py              # 支持 python -m app.db
+│   │   ├── README.md                # DB 配置与使用说明
 │   │   ├── eval_log_repo.py         # upsert_eval_log
 │   │   └── llm_call_log_repo.py     # insert_llm_call_log
 │   └── tasks/

@@ -37,7 +37,7 @@ async def evaluate(
             detail=ErrorResponse(
                 error="UNKNOWN_METRIC_TYPE",
                 message=f"metric_type '{request.metric_type}' is not registered",
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
     # ── 2. Build internal dataclasses ─────────────────────────────────────────
@@ -78,7 +78,7 @@ async def evaluate(
                         message=exc.message,
                     )
                 ],
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
     # ── 4. Evaluate ───────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ async def evaluate(
                 error="PARSE_ERROR",
                 message=exc.message,
                 eval_id=request.eval_id,
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
     except LLMTimeoutError as exc:
         background_tasks.add_task(
@@ -121,7 +121,7 @@ async def evaluate(
                 message=exc.message,
                 retry_count=exc.retry_count,
                 eval_id=request.eval_id,
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
     except LLMAPIError as exc:
         background_tasks.add_task(
@@ -141,7 +141,7 @@ async def evaluate(
                 message=exc.message,
                 retry_count=exc.retry_count,
                 eval_id=request.eval_id,
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
     except Exception as exc:
         logger.exception("Unexpected error for eval_id=%s", request.eval_id)
@@ -160,7 +160,7 @@ async def evaluate(
                 error="INTERNAL_ERROR",
                 message="An unexpected error occurred",
                 eval_id=request.eval_id,
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
     # ── 5. Schedule background persistence ───────────────────────────────────

@@ -24,7 +24,7 @@ async def insert_llm_call_log(
     llm_latency_ms: Optional[int] = None,
 ) -> None:
     log = LLMCallLog(
-        eval_log_id=eval_log_id,
+        eval_log_id=str(eval_log_id),
         judge_model=judge_model,
         prompt_system=prompt_system,
         prompt_user=prompt_user,
