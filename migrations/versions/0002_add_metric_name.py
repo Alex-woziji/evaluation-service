@@ -1,4 +1,4 @@
-"""Add metric_name column to eval_log
+"""Add metric_name column to evaluation_result
 
 Revision ID: 0002
 Revises: 0001
@@ -18,10 +18,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column(
-        "eval_log",
+        "evaluation_result",
         sa.Column("metric_name", sa.String(64), nullable=True),
     )
 
 
 def downgrade() -> None:
-    op.drop_column("eval_log", "metric_name")
+    op.drop_column("evaluation_result", "metric_name")

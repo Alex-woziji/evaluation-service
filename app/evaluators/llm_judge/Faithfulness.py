@@ -47,7 +47,7 @@ class NLIStatementOutput(BaseModel):
 
 class FaithfulnessRequest(BaseModel):
     """Request model for faithfulness evaluation."""
-    eval_id: UUID = Field(default_factory=uuid4, examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"], description="Evaluation ID，不传则自动生成")
+    eval_id: UUID = Field(default_factory=uuid4, examples=[str(uuid4())], description="Evaluation ID，不传则自动生成")
     response: str = Field(..., examples=["梯度下降是一种优化算法"], description="模型生成的回答")
     retrieved_contexts: str = Field(..., examples=["梯度下降（Gradient Descent）是一种用于最小化损失函数的优化算法"], description="检索到的上下文")
     user_input: Optional[str] = Field(None, examples=["请解释梯度下降"], description="用户的原始提问")

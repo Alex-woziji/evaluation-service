@@ -79,7 +79,7 @@ async def _evaluate(
         status="success",
         evaluated_at=evaluated_at,
         score=score,
-        detail=result_data,
+        reason=reason,
         eval_latency_s=latency_s,
     )
 

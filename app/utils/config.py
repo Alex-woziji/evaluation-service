@@ -1,6 +1,18 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class DBSettings(BaseSettings):
+    """Database configuration loaded from environment variables."""
+
+    DB_BACKEND: str = "local"  # "local" | "azure"
+    SQLITE_DB_PATH: str = "data/evaluation.db"
+    AZURE_DB_URL: str = "mock://placeholder"
+
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+
 class LLMSettings(BaseSettings):
     """LLM client configuration loaded from environment variables."""
 
@@ -19,8 +31,17 @@ class LLMSettings(BaseSettings):
     )
 
 
-llm_settings = LLMSettings()
+class AppSettings(BaseSettings):
+    """Application-level configuration loaded from environment variables."""
 
-if __name__ == "__main__":
-    for setting in llm_settings:
-        print(setting)
+    log_level: str = "INFO"
+    app_version: str = "1.0.0"
+
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+
+db_settings = DBSettings()
+llm_settings = LLMSettings()
+app_settings = AppSettings()

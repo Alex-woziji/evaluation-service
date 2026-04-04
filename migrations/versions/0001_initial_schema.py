@@ -1,4 +1,4 @@
-"""Initial schema: eval_log and llm_call_log
+"""Initial schema: evaluation_result and llm_metadata
 
 Revision ID: 0001
 Revises:
@@ -19,17 +19,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.create_table(
-        "eval_log",
+        "evaluation_result",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("metric_type", sa.String(64), nullable=False),
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("score", sa.Float, nullable=True),
         sa.Column("scores_detail", postgresql.JSONB, nullable=True),
-        sa.Column("reasoning", sa.Text, nullable=True),
         sa.Column("error_type", sa.String(64), nullable=True),
         sa.Column("error_message", sa.Text, nullable=True),
-        sa.Column("retry_count", sa.SmallInteger, nullable=False, server_default="0"),
-        sa.Column("eval_latency_ms", sa.Integer, nullable=True),
+        sa.Column("eval_latency_s", sa.Float, nullable=True),
         sa.Column(
             "evaluated_at",
             sa.DateTime(timezone=True),
@@ -39,7 +37,7 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "llm_call_log",
+        "llm_metadata",
         sa.Column(
             "id",
             postgresql.UUID(as_uuid=True),
@@ -47,9 +45,9 @@ def upgrade() -> None:
             server_default=sa.text("gen_random_uuid()"),
         ),
         sa.Column(
-            "eval_log_id",
+            "evaluation_result_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("eval_log.id"),
+            sa.ForeignKey("evaluation_result.id"),
             nullable=False,
         ),
         sa.Column("judge_model", sa.String(128), nullable=False),
@@ -58,14 +56,14 @@ def upgrade() -> None:
         sa.Column("raw_response", postgresql.JSONB, nullable=True),
         sa.Column("input_tokens", sa.Integer, nullable=True),
         sa.Column("output_tokens", sa.Integer, nullable=True),
-        sa.Column("llm_latency_ms", sa.Integer, nullable=True),
+        sa.Column("llm_latency_s", sa.Float, nullable=True),
         sa.Column("attempt_number", sa.SmallInteger, nullable=False),
     )
 
-    op.create_index("ix_llm_call_log_eval_log_id", "llm_call_log", ["eval_log_id"])
+    op.create_index("ix_llm_metadata_evaluation_result_id", "llm_metadata", ["evaluation_result_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_llm_call_log_eval_log_id", table_name="llm_call_log")
-    op.drop_table("llm_call_log")
-    op.drop_table("eval_log")
+    op.drop_index("ix_llm_metadata_evaluation_result_id", table_name="llm_metadata")
+    op.drop_table("llm_metadata")
+    op.drop_table("evaluation_result")
