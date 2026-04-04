@@ -5,7 +5,7 @@ import yaml
 from pydantic import BaseModel, Field
 from typing import List
 
-from app.evaluators.metrics.Faithfulness import Faithfulness
+from app.evaluators.llm_judge.Faithfulness import Faithfulness
 from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
