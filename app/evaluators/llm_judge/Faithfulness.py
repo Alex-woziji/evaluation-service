@@ -2,7 +2,8 @@ import asyncio
 
 import yaml
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 
 from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
@@ -44,12 +45,21 @@ class NLIStatementOutput(BaseModel):
 
 # ---------- Metric ----------
 
+class FaithfulnessRequest(BaseModel):
+    """Request model for faithfulness evaluation."""
+    eval_id: UUID = Field(..., examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"], description="Evaluation ID")
+    response: str = Field(..., examples=["梯度下降是一种优化算法"], description="模型生成的回答")
+    retrieved_contexts: str = Field(..., examples=["梯度下降（Gradient Descent）是一种用于最小化损失函数的优化算法"], description="检索到的上下文")
+    user_input: Optional[str] = Field(None, examples=["请解释梯度下降"], description="用户的原始提问")
+
+
 class Faithfulness:
     """Faithfulness metric — verifies claims against context."""
 
     name: str = "faithfulness"
     required_fields: list[str] = ["response", "retrieved_contexts"]
     optional_fields: list[str] = ["user_input"]
+    request_model = FaithfulnessRequest
 
     async def create_statement(self, response: str, user_input: str | None = None):
         """Break answer into standalone statements."""

@@ -3,6 +3,7 @@ import sys
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import uvicorn
 
 from app.api.v1.evaluate import router as eval_router
 from app.config import settings
@@ -31,3 +32,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=500,
         content={"error": "INTERNAL_ERROR", "message": "An unexpected error occurred"},
     )
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)

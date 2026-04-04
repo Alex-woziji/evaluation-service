@@ -1,245 +1,167 @@
-from __future__ import annotations
-
-import logging
+import time
 from datetime import datetime, timezone
+from typing import Any, Dict
+from uuid import UUID
 
+import openai
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
 
-from app.evaluators import llm_judge_evaluator  # noqa: F401 — ensure registration
-from app.evaluators.base import EvalConfig, EvalRecord
-from app.evaluators.registry import registry
-from app.exceptions import (
-    ConfigValidationError,
-    LLMAPIError,
-    LLMTimeoutError,
-    ParseError,
-    RecordValidationError,
-)
-from app.models.request import EvaluateRequest
+from app.evaluators import evaluator_registry  # noqa: F401 — ensure registration
 from app.models.response import ErrorResponse, EvaluateResponse, ValidationErrorDetail
 from app.tasks.persist import persist_eval_result
+from app.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/evaluation")
 
 
-@router.post("/evaluate", response_model=EvaluateResponse)
-async def evaluate(
-    request: EvaluateRequest,
+def _make_error(status_code: int, error: str, message: str, eval_id=None, detail=None):
+    body = ErrorResponse(error=error, message=message, eval_id=eval_id, detail=detail)
+    raise HTTPException(status_code=status_code, detail=body.model_dump(mode="json"))
+
+
+# ── Core handler logic ────────────────────────────────────────────────────────
+
+async def _evaluate(
+    evaluator_type: str,
+    metric_name: str,
+    eval_id: UUID,
+    record: dict,
     background_tasks: BackgroundTasks,
 ) -> EvaluateResponse:
-    # ── 1. Resolve evaluator ──────────────────────────────────────────────────
-    evaluator = registry.get(request.metric_type)
-    if evaluator is None:
-        raise HTTPException(
-            status_code=422,
-            detail=ErrorResponse(
-                error="UNKNOWN_METRIC_TYPE",
-                message=f"metric_type '{request.metric_type}' is not registered",
-            ).model_dump(mode="json"),
-        )
-
-    # ── 2. Build internal dataclasses ─────────────────────────────────────────
-    # Collect extra fields from EvalConfigIn (Pydantic "extra": "allow")
-    config_data = request.eval_config.model_dump()
-    extra = {
-        k: v
-        for k, v in config_data.items()
-        if k not in {"judge_model", "criteria", "score_range", "language"}
-    }
-    config = EvalConfig(
-        judge_model=request.eval_config.judge_model or "",
-        criteria=request.eval_config.criteria,
-        score_range=request.eval_config.score_range,
-        language=request.eval_config.language,
-        extra=extra,
-    )
-
-    # ── 3. Criteria-level validation ───────────────────────────────────────────
-    unsupported_criteria = [
-        item for item in request.eval_config.criteria if not registry.is_supported_criterion(item)
-    ]
-    if unsupported_criteria:
-        raise HTTPException(
-            status_code=422,
-            detail=ErrorResponse(
-                error="CRITERIA_VALIDATION_ERROR",
-                detail=[
-                    ValidationErrorDetail(
-                        field="eval_config.criteria",
-                        message=(
-                            "unsupported criteria: "
-                            + ", ".join(unsupported_criteria)
-                            + ". supported criteria: "
-                            + ", ".join(registry.list_supported_criteria())
-                        ),
-                    )
-                ],
-            ).model_dump(mode="json"),
-        )
-
-    # ── 4. Metric-level record/config validation ──────────────────────────────
-    try:
-        evaluator.validate_record(request.record, config)
-    except RecordValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=ErrorResponse(
-                error="RECORD_VALIDATION_ERROR",
-                detail=[
-                    ValidationErrorDetail(
-                        field=exc.field or "record",
-                        message=exc.message,
-                    )
-                ],
-            ).model_dump(mode="json"),
-        )
-
-    try:
-        evaluator.validate_config(config)
-    except ConfigValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=ErrorResponse(
-                error="CONFIG_VALIDATION_ERROR",
-                detail=[
-                    ValidationErrorDetail(
-                        field=exc.field or "eval_config",
-                        message=exc.message,
-                    )
-                ],
-            ).model_dump(mode="json"),
-        )
-
-    record = EvalRecord(
-        input=request.record["input"],
-        output=request.record["output"],
-        reference=request.record.get("reference"),
-        metadata={
-            k: v
-            for k, v in request.record.items()
-            if k not in {"input", "output", "reference"}
-        },
-    )
-
-    # ── 4. Evaluate ───────────────────────────────────────────────────────────
     evaluated_at = datetime.now(tz=timezone.utc)
-    try:
-        result = await evaluator.evaluate(record, config)
-    except ParseError as exc:
-        background_tasks.add_task(
-            persist_eval_result,
-            eval_id=request.eval_id,
-            metric_type=request.metric_type,
-            status="failed",
-            evaluated_at=evaluated_at,
-            error_type="PARSE_ERROR",
-            error_message=exc.message,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error="PARSE_ERROR",
-                message=exc.message,
-                eval_id=request.eval_id,
-            ).model_dump(mode="json"),
-        )
-    except LLMTimeoutError as exc:
-        background_tasks.add_task(
-            persist_eval_result,
-            eval_id=request.eval_id,
-            metric_type=request.metric_type,
-            status="failed",
-            evaluated_at=evaluated_at,
-            error_type="LLM_TIMEOUT",
-            error_message=exc.message,
-            retry_count=exc.retry_count,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error="LLM_TIMEOUT",
-                message=exc.message,
-                retry_count=exc.retry_count,
-                eval_id=request.eval_id,
-            ).model_dump(mode="json"),
-        )
-    except LLMAPIError as exc:
-        background_tasks.add_task(
-            persist_eval_result,
-            eval_id=request.eval_id,
-            metric_type=request.metric_type,
-            status="failed",
-            evaluated_at=evaluated_at,
-            error_type="LLM_API_ERROR",
-            error_message=exc.message,
-            retry_count=exc.retry_count,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error="LLM_API_ERROR",
-                message=exc.message,
-                retry_count=exc.retry_count,
-                eval_id=request.eval_id,
-            ).model_dump(mode="json"),
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error for eval_id=%s", request.eval_id)
-        background_tasks.add_task(
-            persist_eval_result,
-            eval_id=request.eval_id,
-            metric_type=request.metric_type,
-            status="failed",
-            evaluated_at=evaluated_at,
-            error_type="INTERNAL_ERROR",
-            error_message=str(exc),
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error="INTERNAL_ERROR",
-                message="An unexpected error occurred",
-                eval_id=request.eval_id,
-            ).model_dump(mode="json"),
-        )
 
-    # ── 5. Schedule background persistence ───────────────────────────────────
+    # ── 1. Resolve ──────────────────────────────────────────────────────────────
+    try:
+        sub = evaluator_registry.get_sub_registry(evaluator_type)
+        metric = sub.get(metric_name)
+    except KeyError:
+        _make_error(422, "UNKNOWN_METRIC", f"metric '{metric_name}' not found", eval_id=eval_id)
+
+    # ── 2. Evaluate ─────────────────────────────────────────────────────────────
+    start = time.monotonic()
+    try:
+        result = await metric.evaluate(**record)
+    except openai.AuthenticationError as exc:
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_AUTH_ERROR", str(exc))
+        _make_error(500, "LLM_AUTH_ERROR", str(exc), eval_id=eval_id)
+    except openai.RateLimitError as exc:
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_RATE_LIMIT", str(exc))
+        _make_error(503, "LLM_RATE_LIMIT", str(exc), eval_id=eval_id)
+    except openai.APITimeoutError as exc:
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_TIMEOUT", str(exc))
+        _make_error(504, "LLM_TIMEOUT", str(exc), eval_id=eval_id)
+    except openai.BadRequestError as exc:
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_BAD_REQUEST", str(exc))
+        _make_error(500, "LLM_BAD_REQUEST", str(exc), eval_id=eval_id)
+    except ValueError as exc:
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "METRIC_ERROR", str(exc))
+        _make_error(500, "METRIC_ERROR", str(exc), eval_id=eval_id)
+    except Exception as exc:
+        logger.exception("Unexpected error for eval_id=%s", eval_id)
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "INTERNAL_ERROR", str(exc))
+        _make_error(500, "INTERNAL_ERROR", "An unexpected error occurred", eval_id=eval_id)
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+
+    # ── 3. Extract result ───────────────────────────────────────────────────────
+    score = None
+    detail = None
+    if isinstance(result, dict):
+        score = result.get("score")
+        detail = {k: v for k, v in result.items() if k != "score"} or None
+
+    # ── 4. Persist ──────────────────────────────────────────────────────────────
     background_tasks.add_task(
         persist_eval_result,
-        eval_id=request.eval_id,
-        metric_type=request.metric_type,
+        eval_id=eval_id,
+        evaluator_type=evaluator_type,
+        metric_name=metric_name,
         status="success",
         evaluated_at=evaluated_at,
-        score=result.score,
-        scores_detail=result.scores_detail,
-        reasoning=result.reasoning,
-        retry_count=result.retry_count,
-        eval_latency_ms=result.eval_latency_ms,
-        llm_call_data=result.llm_call_data,
+        score=score,
+        detail=detail,
+        eval_latency_ms=latency_ms,
     )
 
-    # ── 6. Return response ────────────────────────────────────────────────────
+    # ── 5. Respond ──────────────────────────────────────────────────────────────
     return EvaluateResponse(
-        eval_id=request.eval_id,
-        metric_type=request.metric_type,
+        eval_id=eval_id,
+        evaluator_type=evaluator_type,
+        metric_name=metric_name,
         status="success",
-        score=result.score,
-        scores_detail=result.scores_detail,
-        reasoning=result.reasoning,
-        raw_output=result.raw_output,
-        retry_count=result.retry_count,
-        eval_latency_ms=result.eval_latency_ms,
+        score=score,
+        detail=detail,
+        eval_latency_ms=latency_ms,
         evaluated_at=evaluated_at,
     )
 
+
+def _persist_failure(
+    background_tasks: BackgroundTasks,
+    eval_id: UUID,
+    evaluator_type: str,
+    metric_name: str,
+    evaluated_at: datetime,
+    error_type: str,
+    error_message: str,
+) -> None:
+    background_tasks.add_task(
+        persist_eval_result,
+        eval_id=eval_id,
+        evaluator_type=evaluator_type,
+        metric_name=metric_name,
+        status="failed",
+        evaluated_at=evaluated_at,
+        error_type=error_type,
+        error_message=error_message,
+    )
+
+
+# ── Dynamic route registration ────────────────────────────────────────────────
+
+def _build_handler(eval_type: str, metric_name: str, req_model):
+    """Create a route handler that uses the metric's own request model."""
+
+    async def handler(request: req_model, background_tasks: BackgroundTasks) -> EvaluateResponse:  # type: ignore[valid-type]
+        data = request.model_dump(exclude_none=True)
+        eval_id = data.pop("eval_id")
+        return await _evaluate(eval_type, metric_name, eval_id, data, background_tasks)
+
+    handler.__name__ = f"evaluate_{eval_type}_{metric_name}"
+    return handler
+
+
+def _register_metric_routes() -> None:
+    """Register one POST route per metric found in evaluator_registry."""
+    for eval_type in evaluator_registry.list_types():
+        for metric_name in evaluator_registry.list_metrics(eval_type):
+            metric = evaluator_registry.get(eval_type, metric_name)
+            req_model = metric.request_model
+
+            router.add_api_route(
+                f"/{eval_type}/{metric_name}",
+                _build_handler(eval_type, metric_name, req_model),
+                methods=["POST"],
+                response_model=EvaluateResponse,
+                summary=f"Evaluate {metric_name}",
+                tags=[eval_type],
+            )
+
+
+_register_metric_routes()
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @router.get("/health")
 async def health() -> dict:
+    metrics_info = {}
+    for eval_type in evaluator_registry.list_types():
+        metrics_info[eval_type] = evaluator_registry.list_metrics(eval_type)
     return {
         "status": "ok",
-        "registered_evaluators": registry.list_registered(),
-        "version": "1.0.0",
+        "evaluators": metrics_info,
+        "version": "2.0.0",
     }

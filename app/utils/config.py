@@ -14,7 +14,9 @@ class LLMSettings(BaseSettings):
     LLM_MAX_WAIT: float = 10.0
     LLM_JITTER: float = 0.5
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
 
 llm_settings = LLMSettings()

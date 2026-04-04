@@ -26,7 +26,8 @@ class EvalLog(Base):
     __tablename__ = "eval_log"
 
     id = Column(String(36), primary_key=True)  # = eval_id passed in by scheduler
-    metric_type = Column(String(64), nullable=False)
+    metric_type = Column(String(64), nullable=False)  # evaluator_type (e.g. "llm_judge")
+    metric_name = Column(String(64), nullable=True)  # e.g. "faithfulness"
     status = Column(String(16), nullable=False)  # "success" | "failed"
     score = Column(Float, nullable=True)
     scores_detail = Column(JSON, nullable=True)

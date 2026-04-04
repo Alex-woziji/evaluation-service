@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 from pydantic import BaseModel, Field
 from typing import List
+from uuid import UUID
 
 from app.evaluators.llm_judge.Faithfulness import Faithfulness
 from app.utils.constants import PROMPT_DIR
@@ -29,11 +30,19 @@ def fbeta_score(tp, fp, fn, beta=1.0):
     return (1 + beta_sq) * (precision * recall) / (beta_sq * precision + recall)
 
 
+class FactualCorrectnessRequest(BaseModel):
+    """Request model for factual correctness evaluation."""
+    eval_id: UUID = Field(..., examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"], description="Evaluation ID")
+    reference: str = Field(..., examples=["国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同"], description="标准参考答案")
+    response: str = Field(..., examples=["国产乙肝疫苗与进口疫苗在安全性方面没有区别"], description="模型生成的回答")
+
+
 class FactualCorrectness:
     """Factual-correctness metric (precision / recall / F1)."""
 
     name: str = "factual_correctness"
     required_fields: list[str] = ["reference", "response"]
+    request_model = FactualCorrectnessRequest
 
     def __init__(self, beta: float = 1.0):
         self.beta = beta
