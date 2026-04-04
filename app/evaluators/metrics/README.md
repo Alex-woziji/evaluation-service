@@ -55,3 +55,97 @@ python -m app.evaluators.metrics.llm_utils
 ```
 
 会打印当前所有配置，并用 `call_llm()` 发送一条测试请求验证连通性。
+
+---
+
+## Metrics 运行逻辑
+
+### 文件结构
+
+```
+app/evaluators/metrics/
+├── __init__.py              # 导出 Faithfulness, FactualCorrectness
+├── Faithfulness.py          # Faithfulness 指标
+├── FactualCorrectness.py    # FactualCorrectness 指标
+└── README.md
+```
+
+### 依赖关系
+
+```
+FactualCorrectness
+  ├── call_llm (app/utils/llm_utils.py)   — LLM 调用（含重试）
+  ├── Faithfulness                         — 复用 create_verdict 做事实校验
+  └── prompt.yaml (resource/prompt/)       — Prompt 模板
+
+Faithfulness
+  ├── call_llm (app/utils/llm_utils.py)   — LLM 调用（含重试）
+  └── prompt.yaml (resource/prompt/)       — Prompt 模板
+```
+
+### Faithfulness
+
+**用途**：衡量回答是否忠实于给定上下文（是否存在幻觉）。
+
+**流程**：
+
+1. `create_statement(response, user_input)` — 将回答拆解为独立 statement
+2. `create_verdict(retrieved_contexts, statements)` — 逐条判断每个 statement 是否能从上下文中直接推断
+3. `calculate_score(response, retrieved_contexts, user_input)` — 汇总打分
+
+**输出**：
+
+```json
+{
+  "score": 0.75,
+  "reason": [
+    {"statement": "...", "reason": "...", "verdict": 1},
+    {"statement": "...", "reason": "...", "verdict": 0}
+  ]
+}
+```
+
+- `score` = verdict 为 1 的数量 / statement 总数
+- `reason` = 每条 statement 的判断明细
+
+**独立测试**：
+
+```bash
+python -m app.evaluators.metrics.Faithfulness
+```
+
+### FactualCorrectness
+
+**用途**：衡量回答相对于参考答案的事实正确性（precision / recall / F1）。
+
+**流程**：
+
+1. `decompose_claims(text, split_level)` — 将文本拆解为原子 claims
+2. `verify_claims(premise, claims)` — 用 Faithfulness 判断 claims 是否能被 premise 支持
+3. `calculate_score(reference, response)` — 双向验证并计算分数
+
+**双向验证**：
+- **precision 方向**：拆解 response 的 claims → 检查是否被 reference 支持
+- **recall 方向**：拆解 reference 的 claims → 检查是否被 response 支持
+
+**输出**：
+
+```json
+{
+  "precision": 0.8,
+  "recall": 0.6,
+  "f1": 0.69,
+  "precision_verdicts": [...],
+  "recall_verdicts": [...]
+}
+```
+
+**独立测试**：
+
+```bash
+python -m app.evaluators.metrics.FactualCorrectness
+```
+
+### Prompt 模板
+
+所有 Prompt 定义在 `resource/prompt/prompt.yaml`，通过 `app/utils/constants.py` 的 `PROMPT_DIR` 常量引用。修改 Prompt 只需编辑 yaml 文件，无需改代码。

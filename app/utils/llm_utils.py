@@ -8,6 +8,7 @@ from typing import Any
 
 import openai
 from openai import AsyncAzureOpenAI
+from pydantic import BaseModel
 
 from app.utils.config import llm_settings
 from app.utils.logger import get_logger
@@ -40,7 +41,7 @@ def get_llm_client() -> AsyncAzureOpenAI:
 
 async def call_llm(
     messages: list[dict[str, Any]],
-    response_format: dict[str, Any] | None = None,
+    response_format: dict[str, Any] | type[BaseModel] | None = None,
 ) -> Any:
     """Send messages to LLM and return the API response. Retry is built-in.
 
@@ -48,8 +49,9 @@ async def call_llm(
     ----------
     messages : list[dict]
         Chat messages to send.
-    response_format : dict | None
-        Optional response format (e.g. ``{"type": "json_object"}``).
+    response_format : dict | type[BaseModel] | None
+        ``{"type": "json_object"}`` for plain JSON, or a Pydantic model class
+        for structured output (uses ``parse()`` under the hood).
 
     Returns
     -------
@@ -78,9 +80,13 @@ async def call_llm(
     max_attempts = llm_settings.LLM_MAX_ATTEMPTS
     last_error: Exception | None = None
 
+    # Use parse() for pydantic models, create() otherwise
+    _is_parse = isinstance(response_format, type) and issubclass(response_format, BaseModel)
+    _call = client.chat.completions.parse if _is_parse else client.chat.completions.create
+
     for attempt in range(1, max_attempts + 1):
         try:
-            return await client.chat.completions.create(**kwargs)
+            return await _call(**kwargs)
 
         except openai.AuthenticationError:
             raise
