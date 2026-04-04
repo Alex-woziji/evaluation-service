@@ -22,7 +22,7 @@ async def persist_eval_result(
     reasoning: Optional[str] = None,
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
-    eval_latency_ms: Optional[int] = None,
+    eval_latency_s: Optional[float] = None,
 ) -> None:
     """Background task: write eval_log.
 
@@ -42,7 +42,7 @@ async def persist_eval_result(
                 reasoning=reasoning,
                 error_type=error_type,
                 error_message=error_message,
-                eval_latency_ms=eval_latency_ms,
+                eval_latency_s=eval_latency_s,
             )
     except Exception:
         logger.exception(
