@@ -9,6 +9,13 @@ class ConfigValidationError(EvaluationError):
         self.message = message
         self.field = field
 
+class RecordValidationError(EvaluationError):
+    """Raised when metric-level record validation fails."""
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.field = field
+
 class ParseError(EvaluationError):
     """Raised when LLM response cannot be parsed. No retry."""
     def __init__(self, message: str, raw_response: str | None = None):

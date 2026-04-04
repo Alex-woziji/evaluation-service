@@ -37,6 +37,14 @@ class EvalResult:
 class BaseEvaluator(ABC):
     metric_type: str = ""
 
+    def validate_record(self, record: Dict[str, Any], config: EvalConfig) -> None:
+        """
+        Validate metric-specific record fields.
+        Raise RecordValidationError on failure.
+        Default: no-op (subclasses override as needed).
+        """
+        pass
+
     def validate_config(self, config: EvalConfig) -> None:
         """
         Validate metric-specific config fields.

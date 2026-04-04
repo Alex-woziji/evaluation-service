@@ -36,7 +36,6 @@ def base_payload(eval_id: str) -> dict:
         "eval_config": {
             "judge_model": "gpt-4o",
             "criteria": ["accuracy", "completeness", "clarity"],
-            "rubric": "评估回答质量",
         },
     }
 
@@ -109,10 +108,12 @@ async def test_missing_eval_id_returns_422(async_client, base_payload):
 
 
 async def test_missing_record_input_returns_422(async_client, base_payload):
-    base_payload["record"]["input"] = ""
+    del base_payload["record"]["input"]
     async with async_client as client:
         resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
     assert resp.status_code == 422
+    body = resp.json()
+    assert body["detail"]["error"] == "RECORD_VALIDATION_ERROR"
 
 
 async def test_unknown_metric_type_returns_422(async_client, base_payload):
@@ -147,6 +148,45 @@ async def test_invalid_score_range_returns_422(async_client, base_payload):
     async with async_client as client:
         resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
     assert resp.status_code == 422
+
+
+# ── Criteria validation errors ─────────────────────────────────────────────────
+
+async def test_unsupported_criterion_returns_422(async_client, base_payload):
+    base_payload["eval_config"]["criteria"] = ["accuracy", "unsupported_metric"]
+    async with async_client as client:
+        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["detail"]["error"] == "CRITERIA_VALIDATION_ERROR"
+
+
+async def test_accuracy_without_reference_returns_422(async_client, base_payload):
+    base_payload["record"].pop("reference", None)
+    base_payload["eval_config"]["criteria"] = ["accuracy"]
+    async with async_client as client:
+        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["detail"]["error"] == "RECORD_VALIDATION_ERROR"
+
+
+async def test_completeness_without_reference_succeeds(async_client, base_payload):
+    base_payload["record"].pop("reference", None)
+    base_payload["eval_config"]["criteria"] = ["completeness", "clarity"]
+    mock_resp = _mock_llm({"completeness": 0.8, "clarity": 0.7})
+    with (
+        patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls,
+        patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock),
+    ):
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_resp)
+        mock_cls.return_value = mock_client
+
+        async with async_client as client:
+            resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+
+    assert resp.status_code == 200
 
 
 # ── LLM error paths ────────────────────────────────────────────────────────────

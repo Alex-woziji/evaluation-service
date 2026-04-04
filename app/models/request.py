@@ -6,17 +6,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 
-class RecordIn(BaseModel):
-    input: str = Field(..., min_length=1)
-    output: str = Field(..., min_length=1)
-    reference: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
 class EvalConfigIn(BaseModel):
     judge_model: Optional[str] = None
     criteria: List[str] = Field(default_factory=list)
-    rubric: Optional[str] = None
     score_range: Dict[str, float] = Field(default_factory=lambda: {"min": 0.0, "max": 1.0})
     language: str = "zh"
 
@@ -35,5 +27,12 @@ class EvalConfigIn(BaseModel):
 class EvaluateRequest(BaseModel):
     eval_id: UUID
     metric_type: str = Field(..., min_length=1)
-    record: RecordIn
+    record: Dict[str, Any]
     eval_config: EvalConfigIn
+
+    @field_validator("record")
+    @classmethod
+    def validate_record(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise ValueError("record must be an object")
+        return v

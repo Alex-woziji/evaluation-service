@@ -50,3 +50,25 @@ class TestEvaluatorRegistry:
         from app.evaluators.registry import registry
 
         assert "llm_judge" in registry.list_registered()
+
+
+class TestCriteriaValidation:
+    def test_supported_criterion(self):
+        from app.evaluators.registry import EvaluatorRegistry
+        reg = EvaluatorRegistry()
+        assert reg.is_supported_criterion("accuracy") is True
+        assert reg.is_supported_criterion("completeness") is True
+        assert reg.is_supported_criterion("clarity") is True
+
+    def test_unsupported_criterion(self):
+        from app.evaluators.registry import EvaluatorRegistry
+        reg = EvaluatorRegistry()
+        assert reg.is_supported_criterion("nonexistent") is False
+
+    def test_list_supported_criteria(self):
+        from app.evaluators.registry import EvaluatorRegistry
+        reg = EvaluatorRegistry()
+        criteria = reg.list_supported_criteria()
+        assert "accuracy" in criteria
+        assert "completeness" in criteria
+        assert "clarity" in criteria

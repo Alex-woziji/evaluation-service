@@ -12,7 +12,13 @@ from openai import AsyncOpenAI
 
 from app.evaluators.base import BaseEvaluator, EvalConfig, EvalRecord, EvalResult
 from app.evaluators.registry import registry
-from app.exceptions import ConfigValidationError, LLMAPIError, LLMTimeoutError, ParseError
+from app.exceptions import (
+    ConfigValidationError,
+    LLMAPIError,
+    LLMTimeoutError,
+    ParseError,
+    RecordValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +101,27 @@ class LLMJudgeEvaluator(BaseEvaluator):
     _BASE_WAIT = 2.0  # seconds, exponential base
     _MAX_WAIT = 10.0  # seconds cap
     _JITTER = 0.5  # ±0.5s
+
+    def validate_record(self, record: Dict[str, Any], config: EvalConfig) -> None:
+        input_text = record.get("input")
+        output_text = record.get("output")
+
+        if not isinstance(input_text, str) or not input_text.strip():
+            raise RecordValidationError(
+                "input is required for llm_judge", field="record.input"
+            )
+        if not isinstance(output_text, str) or not output_text.strip():
+            raise RecordValidationError(
+                "output is required for llm_judge", field="record.output"
+            )
+
+        if "accuracy" in config.criteria:
+            reference_text = record.get("reference")
+            if not isinstance(reference_text, str) or not reference_text.strip():
+                raise RecordValidationError(
+                    "reference is required when criteria includes accuracy",
+                    field="record.reference",
+                )
 
     def validate_config(self, config: EvalConfig) -> None:
         if not config.judge_model:

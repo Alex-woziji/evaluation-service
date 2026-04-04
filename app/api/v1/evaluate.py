@@ -14,6 +14,7 @@ from app.exceptions import (
     LLMAPIError,
     LLMTimeoutError,
     ParseError,
+    RecordValidationError,
 )
 from app.models.request import EvaluateRequest
 from app.models.response import ErrorResponse, EvaluateResponse, ValidationErrorDetail
@@ -41,30 +42,61 @@ async def evaluate(
         )
 
     # ── 2. Build internal dataclasses ─────────────────────────────────────────
-    record = EvalRecord(
-        input=request.record.input,
-        output=request.record.output,
-        reference=request.record.reference,
-        metadata=request.record.metadata,
-    )
-
     # Collect extra fields from EvalConfigIn (Pydantic "extra": "allow")
     config_data = request.eval_config.model_dump()
     extra = {
         k: v
         for k, v in config_data.items()
-        if k not in {"judge_model", "criteria", "rubric", "score_range", "language"}
+        if k not in {"judge_model", "criteria", "score_range", "language"}
     }
     config = EvalConfig(
         judge_model=request.eval_config.judge_model or "",
         criteria=request.eval_config.criteria,
-        rubric=request.eval_config.rubric,
         score_range=request.eval_config.score_range,
         language=request.eval_config.language,
         extra=extra,
     )
 
-    # ── 3. Metric-level config validation ─────────────────────────────────────
+    # ── 3. Criteria-level validation ───────────────────────────────────────────
+    unsupported_criteria = [
+        item for item in request.eval_config.criteria if not registry.is_supported_criterion(item)
+    ]
+    if unsupported_criteria:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorResponse(
+                error="CRITERIA_VALIDATION_ERROR",
+                detail=[
+                    ValidationErrorDetail(
+                        field="eval_config.criteria",
+                        message=(
+                            "unsupported criteria: "
+                            + ", ".join(unsupported_criteria)
+                            + ". supported criteria: "
+                            + ", ".join(registry.list_supported_criteria())
+                        ),
+                    )
+                ],
+            ).model_dump(mode="json"),
+        )
+
+    # ── 4. Metric-level record/config validation ──────────────────────────────
+    try:
+        evaluator.validate_record(request.record, config)
+    except RecordValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorResponse(
+                error="RECORD_VALIDATION_ERROR",
+                detail=[
+                    ValidationErrorDetail(
+                        field=exc.field or "record",
+                        message=exc.message,
+                    )
+                ],
+            ).model_dump(mode="json"),
+        )
+
     try:
         evaluator.validate_config(config)
     except ConfigValidationError as exc:
@@ -80,6 +112,17 @@ async def evaluate(
                 ],
             ).model_dump(mode="json"),
         )
+
+    record = EvalRecord(
+        input=request.record["input"],
+        output=request.record["output"],
+        reference=request.record.get("reference"),
+        metadata={
+            k: v
+            for k, v in request.record.items()
+            if k not in {"input", "output", "reference"}
+        },
+    )
 
     # ── 4. Evaluate ───────────────────────────────────────────────────────────
     evaluated_at = datetime.now(tz=timezone.utc)

@@ -11,7 +11,7 @@ import pytest
 
 from app.evaluators.base import EvalConfig, EvalRecord
 from app.evaluators.llm_judge_evaluator import LLMJudgeEvaluator
-from app.exceptions import ConfigValidationError, LLMAPIError, LLMTimeoutError, ParseError
+from app.exceptions import ConfigValidationError, LLMAPIError, LLMTimeoutError, ParseError, RecordValidationError
 
 
 @pytest.fixture
@@ -24,17 +24,76 @@ def valid_config() -> EvalConfig:
     return EvalConfig(
         judge_model="gpt-4o",
         criteria=["accuracy", "completeness", "clarity"],
-        rubric="Evaluate the answer quality.",
     )
 
 
 @pytest.fixture
-def record() -> EvalRecord:
-    return EvalRecord(
-        input="请解释什么是梯度下降",
-        output="梯度下降是一种优化算法...",
-        reference="梯度下降（Gradient Descent）是...",
-    )
+def record() -> dict:
+    return {
+        "input": "请解释什么是梯度下降",
+        "output": "梯度下降是一种优化算法...",
+        "reference": "梯度下降（Gradient Descent）是...",
+    }
+
+
+# ── validate_record ─────────────────────────────────────────────────────────────
+
+class TestValidateRecord:
+    def test_valid_record_passes(self, evaluator, valid_config, record):
+        evaluator.validate_record(record, valid_config)
+
+    def test_missing_input_raises(self, evaluator, valid_config, record):
+        del record["input"]
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, valid_config)
+        assert exc.value.field == "record.input"
+
+    def test_empty_input_raises(self, evaluator, valid_config, record):
+        record["input"] = ""
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, valid_config)
+        assert exc.value.field == "record.input"
+
+    def test_missing_output_raises(self, evaluator, valid_config, record):
+        del record["output"]
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, valid_config)
+        assert exc.value.field == "record.output"
+
+    def test_accuracy_without_reference_raises(self, evaluator, record):
+        config = EvalConfig(
+            judge_model="gpt-4o",
+            criteria=["accuracy"],
+        )
+        record.pop("reference", None)
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, config)
+        assert exc.value.field == "record.reference"
+        assert "accuracy" in exc.value.message
+
+    def test_accuracy_with_empty_reference_raises(self, evaluator, record):
+        config = EvalConfig(
+            judge_model="gpt-4o",
+            criteria=["accuracy"],
+        )
+        record["reference"] = "  "
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, config)
+        assert exc.value.field == "record.reference"
+
+    def test_completeness_without_reference_passes(self, evaluator, record):
+        config = EvalConfig(
+            judge_model="gpt-4o",
+            criteria=["completeness", "clarity"],
+        )
+        record.pop("reference", None)
+        evaluator.validate_record(record, config)
+
+    def test_non_string_input_raises(self, evaluator, valid_config, record):
+        record["input"] = 123
+        with pytest.raises(RecordValidationError) as exc:
+            evaluator.validate_record(record, valid_config)
+        assert exc.value.field == "record.input"
 
 
 # ── validate_config ────────────────────────────────────────────────────────────
@@ -88,7 +147,12 @@ def _mock_openai_response(criteria_scores: dict, reasoning: str = "looks good"):
 
 @pytest.mark.asyncio
 class TestEvaluateSuccess:
-    async def test_returns_eval_result(self, evaluator, valid_config, record):
+    async def test_returns_eval_result(self, evaluator, valid_config):
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+            reference="梯度下降（Gradient Descent）是...",
+        )
         mock_resp = _mock_openai_response(
             {"accuracy": 0.9, "completeness": 0.8, "clarity": 0.85}
         )
@@ -109,7 +173,12 @@ class TestEvaluateSuccess:
         assert len(result.llm_call_data) == 1
         assert result.llm_call_data[0]["attempt_number"] == 1
 
-    async def test_scores_clamped_to_0_1(self, evaluator, valid_config, record):
+    async def test_scores_clamped_to_0_1(self, evaluator, valid_config):
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+            reference="梯度下降（Gradient Descent）是...",
+        )
         mock_resp = _mock_openai_response({"accuracy": 1.5, "completeness": -0.2})
         with patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls:
             mock_client = AsyncMock()
@@ -125,8 +194,13 @@ class TestEvaluateSuccess:
 
 @pytest.mark.asyncio
 class TestEvaluateRetry:
-    async def test_retries_on_rate_limit_then_succeeds(self, evaluator, valid_config, record):
+    async def test_retries_on_rate_limit_then_succeeds(self, evaluator, valid_config):
         import openai
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+            reference="梯度下降（Gradient Descent）是...",
+        )
         mock_resp = _mock_openai_response({"accuracy": 0.9})
         side_effects = [
             openai.RateLimitError("rate limit", response=MagicMock(), body={}),
@@ -142,8 +216,12 @@ class TestEvaluateRetry:
         assert result.retry_count == 1
         assert len(result.llm_call_data) == 2
 
-    async def test_raises_llm_api_error_after_max_retries(self, evaluator, valid_config, record):
+    async def test_raises_llm_api_error_after_max_retries(self, evaluator, valid_config):
         import openai
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+        )
         with patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(
@@ -155,8 +233,12 @@ class TestEvaluateRetry:
                     await evaluator.evaluate(record, valid_config)
         assert exc.value.retry_count == 2
 
-    async def test_raises_llm_timeout_after_max_retries(self, evaluator, valid_config, record):
+    async def test_raises_llm_timeout_after_max_retries(self, evaluator, valid_config):
         import openai
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+        )
         with patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(
@@ -168,7 +250,11 @@ class TestEvaluateRetry:
                     await evaluator.evaluate(record, valid_config)
         assert exc.value.retry_count == 2
 
-    async def test_no_retry_on_parse_error(self, evaluator, valid_config, record):
+    async def test_no_retry_on_parse_error(self, evaluator, valid_config):
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+        )
         bad_content = "not json at all"
         message = MagicMock()
         message.content = bad_content
@@ -192,8 +278,12 @@ class TestEvaluateRetry:
         # Only 1 call — no retry after parse error
         assert mock_client.chat.completions.create.call_count == 1
 
-    async def test_no_retry_on_auth_error(self, evaluator, valid_config, record):
+    async def test_no_retry_on_auth_error(self, evaluator, valid_config):
         import openai
+        record = EvalRecord(
+            input="请解释什么是梯度下降",
+            output="梯度下降是一种优化算法...",
+        )
         with patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(
