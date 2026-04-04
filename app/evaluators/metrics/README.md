@@ -1,10 +1,101 @@
-# LLM Client 配置说明
+# Metrics 系统说明
 
-## 环境变量
+## 架构
+
+```
+API 层（路由/存储） → Registry 层（发现/校验） → Metrics 层（纯评估逻辑）
+```
+
+三层职责分离，Metrics 不依赖任何业务层代码，只依赖 `call_llm`。
+
+## 文件结构
+
+```
+app/evaluators/metrics/
+├── __init__.py            # 导入即注册所有 metric 实例
+├── registry.py            # MetricRegistry 全局单例
+├── Faithfulness.py        # Metric 实现
+├── FactualCorrectness.py  # Metric 实现
+└── README.md
+```
+
+## 如何注册一个新 Metric
+
+### 1. 创建 Metric 类
+
+在 `app/evaluators/metrics/` 下新建文件，实现一个朴素类，必须具备以下三个属性：
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `name` | `str` | 全局唯一标识，用于 registry 查找和 API 路由 |
+| `required_fields` | `list[str]` | evaluate 所需的必填字段，registry 用于入参校验 |
+| `optional_fields` | `list[str]` | 选填字段（可省略，默认空列表） |
+| `evaluate` | `async def` | 统一评估入口，接收关键字参数，返回 dict |
+
+```python
+class MyMetric:
+    name: str = "my_metric"
+    required_fields: list[str] = ["response", "reference"]
+    optional_fields: list[str] = ["context"]  # 可省略
+
+    async def evaluate(self, response: str, reference: str, context: str | None = None) -> dict:
+        # ... 调用 call_llm 做评估 ...
+        return {"score": 0.9, "reason": "..."}
+```
+
+约束：
+- 不继承基类，不引用 registry
+- 内部通过 `from app.utils.llm_utils import call_llm` 调用 LLM
+- Prompt 模板写在 `resource/prompt/prompt.yaml`
+
+### 2. 注册到 Registry
+
+在 `__init__.py` 中导入并注册：
+
+```python
+from app.evaluators.metrics.MyMetric import MyMetric
+from app.evaluators.metrics.registry import metric_registry
+
+metric_registry.register(MyMetric())
+```
+
+`register()` 会通过 duck typing 检查 `name`、`required_fields`、`evaluate` 是否存在，缺失则抛 `TypeError`。
+
+## Registry 运行机制
+
+`metric_registry`（`registry.py`）是全局单例，提供以下接口：
+
+| 方法 | 说明 |
+|------|------|
+| `register(metric)` | 注册 metric 实例，duck typing 校验三属性 |
+| `get(name)` | 按 name 获取 metric 实例，未注册抛 `KeyError` |
+| `validate_record(name, record)` | 校验 dict 是否包含该 metric 的所有 `required_fields`，缺字段抛 `ValueError` |
+| `list_metrics()` | 返回所有已注册的 metric name |
+
+典型调用流程（API 层）：
+
+```python
+metric_registry.validate_record("faithfulness", record)  # 校验入参
+metric = metric_registry.get("faithfulness")              # 获取实例
+result = await metric.evaluate(**record)                   # 执行评估
+```
+
+## Prompt 模板
+
+所有 Prompt 定义在 `resource/prompt/prompt.yaml`，通过 `app/utils/constants.py` 的 `PROMPT_DIR` 引用。修改 Prompt 只需编辑 yaml 文件，无需改代码。
+
+## LLM 配置
+
+LLM 调用统一通过 `call_llm()`（`app/utils/llm_utils.py`），内置重试和错误分类：
+
+- **非重试错误**：缺环境变量（`ValueError`）、认证失败、请求格式错误 → 立即抛出
+- **可重试错误**：超时、限流、503 → 指数退避重试
+
+### 环境变量
 
 LLM client 的所有配置通过环境变量管理，定义在 `app/utils/config.py` 的 `LLMSettings` 类中。
 
-### 必填项
+#### 必填项
 
 启动前必须在 `.env` 文件或系统环境变量中设置：
 
@@ -15,7 +106,7 @@ LLM client 的所有配置通过环境变量管理，定义在 `app/utils/config
 
 如果未设置，`call_llm()` 调用时会抛出 `ValueError`。
 
-### 可选项（有默认值）
+#### 可选项（有默认值）
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
@@ -27,14 +118,14 @@ LLM client 的所有配置通过环境变量管理，定义在 `app/utils/config
 | `LLM_MAX_WAIT` | `10.0` | 最大等待时间（秒） |
 | `LLM_JITTER` | `0.5` | 随机抖动范围（秒） |
 
-## 配置生效流程
+#### 配置生效流程
 
 ```
 .env / 系统环境变量
        ↓  pydantic_settings 自动读取
 LLMSettings (app/utils/config.py)
        ↓  llm_settings 单例
-get_llm_client() / call_llm() (app/evaluators/metrics/llm_utils.py)
+get_llm_client() / call_llm() (app/utils/llm_utils.py)
 ```
 
 1. `LLMSettings` 继承 `BaseSettings`，启动时自动从 `.env` 文件和环境变量加载
@@ -42,110 +133,16 @@ get_llm_client() / call_llm() (app/evaluators/metrics/llm_utils.py)
 3. `get_llm_client()` 从 `llm_settings` 读取 key/endpoint 创建 `AsyncAzureOpenAI`
 4. `call_llm()` 从 `llm_settings` 读取 model/temperature/重试参数执行调用
 
-## 修改配置
+#### 修改配置
 
 - **改默认值**：直接修改 `app/utils/config.py` 中 `LLMSettings` 的字段默认值
 - **运行时覆盖**：在 `.env` 文件中设置对应的环境变量名即可覆盖默认值，无需改代码
 
-## 快速测试
+#### 快速测试
 
 ```bash
 # 在项目根目录执行
-python -m app.evaluators.metrics.llm_utils
+python -m app.utils.llm_utils
 ```
 
 会打印当前所有配置，并用 `call_llm()` 发送一条测试请求验证连通性。
-
----
-
-## Metrics 运行逻辑
-
-### 文件结构
-
-```
-app/evaluators/metrics/
-├── __init__.py              # 导出 Faithfulness, FactualCorrectness
-├── Faithfulness.py          # Faithfulness 指标
-├── FactualCorrectness.py    # FactualCorrectness 指标
-└── README.md
-```
-
-### 依赖关系
-
-```
-FactualCorrectness
-  ├── call_llm (app/utils/llm_utils.py)   — LLM 调用（含重试）
-  ├── Faithfulness                         — 复用 create_verdict 做事实校验
-  └── prompt.yaml (resource/prompt/)       — Prompt 模板
-
-Faithfulness
-  ├── call_llm (app/utils/llm_utils.py)   — LLM 调用（含重试）
-  └── prompt.yaml (resource/prompt/)       — Prompt 模板
-```
-
-### Faithfulness
-
-**用途**：衡量回答是否忠实于给定上下文（是否存在幻觉）。
-
-**流程**：
-
-1. `create_statement(response, user_input)` — 将回答拆解为独立 statement
-2. `create_verdict(retrieved_contexts, statements)` — 逐条判断每个 statement 是否能从上下文中直接推断
-3. `calculate_score(response, retrieved_contexts, user_input)` — 汇总打分
-
-**输出**：
-
-```json
-{
-  "score": 0.75,
-  "reason": [
-    {"statement": "...", "reason": "...", "verdict": 1},
-    {"statement": "...", "reason": "...", "verdict": 0}
-  ]
-}
-```
-
-- `score` = verdict 为 1 的数量 / statement 总数
-- `reason` = 每条 statement 的判断明细
-
-**独立测试**：
-
-```bash
-python -m app.evaluators.metrics.Faithfulness
-```
-
-### FactualCorrectness
-
-**用途**：衡量回答相对于参考答案的事实正确性（precision / recall / F1）。
-
-**流程**：
-
-1. `decompose_claims(text, split_level)` — 将文本拆解为原子 claims
-2. `verify_claims(premise, claims)` — 用 Faithfulness 判断 claims 是否能被 premise 支持
-3. `calculate_score(reference, response)` — 双向验证并计算分数
-
-**双向验证**：
-- **precision 方向**：拆解 response 的 claims → 检查是否被 reference 支持
-- **recall 方向**：拆解 reference 的 claims → 检查是否被 response 支持
-
-**输出**：
-
-```json
-{
-  "precision": 0.8,
-  "recall": 0.6,
-  "f1": 0.69,
-  "precision_verdicts": [...],
-  "recall_verdicts": [...]
-}
-```
-
-**独立测试**：
-
-```bash
-python -m app.evaluators.metrics.FactualCorrectness
-```
-
-### Prompt 模板
-
-所有 Prompt 定义在 `resource/prompt/prompt.yaml`，通过 `app/utils/constants.py` 的 `PROMPT_DIR` 常量引用。修改 Prompt 只需编辑 yaml 文件，无需改代码。

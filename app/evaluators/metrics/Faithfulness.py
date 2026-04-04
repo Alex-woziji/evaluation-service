@@ -46,6 +46,10 @@ class NLIStatementOutput(BaseModel):
 class Faithfulness:
     """Faithfulness metric — verifies claims against context."""
 
+    name: str = "faithfulness"
+    required_fields: list[str] = ["response", "retrieved_contexts"]
+    optional_fields: list[str] = ["user_input"]
+
     async def create_statement(self, response: str, user_input: str | None = None):
         """Break answer into standalone statements."""
         logger.info("Starting statement extraction for faithfulness evaluation")
@@ -71,7 +75,7 @@ class Faithfulness:
         resp = await call_llm(messages, response_format=NLIStatementOutput)
         return resp.choices[0].message.parsed.statements
 
-    async def calculate_score(self, response: str, retrieved_contexts: str, user_input: str | None = None):
+    async def evaluate(self, response: str, retrieved_contexts: str, user_input: str | None = None):
         """Calculate faithfulness score.
 
         Returns ``{"score": float, "reason": list[dict]}`` where *score* is the
@@ -101,7 +105,7 @@ if __name__ == "__main__":
         )
         response = "John is majoring in Biology and he is a dedicated student."
 
-        result = await ff.calculate_score(retrieved_contexts=context, response=response)
+        result = await ff.evaluate(retrieved_contexts=context, response=response)
         print(f"Score: {result['score']}")
         print(f"Reason: {result['reason']}")
 

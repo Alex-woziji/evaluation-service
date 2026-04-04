@@ -32,6 +32,9 @@ def fbeta_score(tp, fp, fn, beta=1.0):
 class FactualCorrectness:
     """Factual-correctness metric (precision / recall / F1)."""
 
+    name: str = "factual_correctness"
+    required_fields: list[str] = ["reference", "response"]
+
     def __init__(self, beta: float = 1.0):
         self.beta = beta
 
@@ -69,7 +72,7 @@ class FactualCorrectness:
         claims = await self.decompose_claims(response, split_level)
         return await self.verify_claims(premise=reference, hypothesis_list=claims)
 
-    async def calculate_score(self, reference: str, response: str):
+    async def evaluate(self, reference: str, response: str):
         reference_response, precision_verdicts = await self.decompose_and_verify_claims(
             reference=reference, response=response, split_level="HIGH_ATOMICITY_HIGH_COVERAGE",
         )
@@ -93,7 +96,7 @@ class FactualCorrectness:
 if __name__ == "__main__":
     async def _test():
         fc = FactualCorrectness()
-        res = await fc.calculate_score(
+        res = await fc.evaluate(
             reference="国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同，均可放心使用。",
             response="国产乙肝疫苗与进口疫苗在安全性方面没有区别。",
         )
