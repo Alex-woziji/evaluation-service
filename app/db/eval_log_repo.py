@@ -24,7 +24,7 @@ async def upsert_eval_log(
     reasoning: Optional[str] = None,
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
-    eval_latency_ms: Optional[int] = None,
+    eval_latency_s: Optional[float] = None,
 ) -> None:
     eval_id_str = str(eval_id)
 
@@ -41,7 +41,7 @@ async def upsert_eval_log(
                 reasoning=reasoning,
                 error_type=error_type,
                 error_message=error_message,
-                eval_latency_ms=eval_latency_ms,
+                eval_latency_s=eval_latency_s,
                 evaluated_at=evaluated_at,
             )
         )
@@ -54,7 +54,7 @@ async def upsert_eval_log(
         existing.reasoning = reasoning
         existing.error_type = error_type
         existing.error_message = error_message
-        existing.eval_latency_ms = eval_latency_ms
+        existing.eval_latency_s = eval_latency_s
         existing.evaluated_at = evaluated_at
 
     await session.commit()

@@ -17,7 +17,7 @@ class MetricResult(BaseModel):
 class EvalMetadata(BaseModel):
     evaluator_type: str
     metric_name: str
-    eval_latency_ms: int
+    eval_latency_s: float
     evaluated_at: datetime
 
 

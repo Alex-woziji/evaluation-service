@@ -63,7 +63,7 @@ async def _evaluate(
         _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "INTERNAL_ERROR", str(exc))
         _make_error(500, "INTERNAL_ERROR", "An unexpected error occurred", eval_id=eval_id)
 
-    latency_ms = int((time.monotonic() - start) * 1000)
+    latency_s = round(time.monotonic() - start, 3)
 
     # ── 3. Build response ───────────────────────────────────────────────────────
     result_data = result if isinstance(result, dict) else {}
@@ -80,7 +80,7 @@ async def _evaluate(
         evaluated_at=evaluated_at,
         score=score,
         detail=result_data,
-        eval_latency_ms=latency_ms,
+        eval_latency_s=latency_s,
     )
 
     # ── 5. Respond ──────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ async def _evaluate(
         metadata=EvalMetadata(
             evaluator_type=evaluator_type,
             metric_name=metric_name,
-            eval_latency_ms=latency_ms,
+            eval_latency_s=latency_s,
             evaluated_at=evaluated_at,
         ),
     )

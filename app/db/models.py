@@ -35,7 +35,7 @@ class EvalLog(Base):
     error_type = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
     retry_count = Column(SmallInteger, nullable=False, default=0)
-    eval_latency_ms = Column(Integer, nullable=True)
+    eval_latency_s = Column(Float, nullable=True)
     evaluated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     llm_call_logs = relationship(

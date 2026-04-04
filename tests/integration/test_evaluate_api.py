@@ -84,7 +84,7 @@ async def test_evaluate_faithfulness_success(async_client, eval_id):
     # metadata section
     assert body["metadata"]["evaluator_type"] == "llm_judge"
     assert body["metadata"]["metric_name"] == "faithfulness"
-    assert body["metadata"]["eval_latency_ms"] >= 0
+    assert body["metadata"]["eval_latency_s"] >= 0
     assert "evaluated_at" in body["metadata"]
 
 
