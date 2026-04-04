@@ -7,7 +7,7 @@ import openai
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.evaluators import evaluator_registry  # noqa: F401 — ensure registration
-from app.models.response import ErrorResponse, EvaluateResponse, ValidationErrorDetail
+from app.models.response import ErrorResponse, EvalMetadata, EvaluateResponse, MetricResult, ValidationErrorDetail
 from app.tasks.persist import persist_eval_result
 from app.utils.logger import get_logger
 
@@ -65,12 +65,10 @@ async def _evaluate(
 
     latency_ms = int((time.monotonic() - start) * 1000)
 
-    # ── 3. Extract result ───────────────────────────────────────────────────────
-    score = None
-    detail = None
-    if isinstance(result, dict):
-        score = result.get("score")
-        detail = {k: v for k, v in result.items() if k != "score"} or None
+    # ── 3. Build response ───────────────────────────────────────────────────────
+    result_data = result if isinstance(result, dict) else {}
+    score = result_data.get("score")
+    reason = result_data.get("reason")
 
     # ── 4. Persist ──────────────────────────────────────────────────────────────
     background_tasks.add_task(
@@ -81,20 +79,21 @@ async def _evaluate(
         status="success",
         evaluated_at=evaluated_at,
         score=score,
-        detail=detail,
+        detail=result_data,
         eval_latency_ms=latency_ms,
     )
 
     # ── 5. Respond ──────────────────────────────────────────────────────────────
     return EvaluateResponse(
         eval_id=eval_id,
-        evaluator_type=evaluator_type,
-        metric_name=metric_name,
         status="success",
-        score=score,
-        detail=detail,
-        eval_latency_ms=latency_ms,
-        evaluated_at=evaluated_at,
+        result=MetricResult(score=score, reason=reason, **{k: v for k, v in result_data.items() if k not in ("score", "reason")}),
+        metadata=EvalMetadata(
+            evaluator_type=evaluator_type,
+            metric_name=metric_name,
+            eval_latency_ms=latency_ms,
+            evaluated_at=evaluated_at,
+        ),
     )
 
 

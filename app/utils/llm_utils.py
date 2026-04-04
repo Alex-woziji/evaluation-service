@@ -96,9 +96,11 @@ async def call_llm(
             if exc.status_code != 503:
                 raise
             last_error = exc
+            logger.warning("Attempt %d/%d failed: APIStatusError 503: %s", attempt, max_attempts, exc)
 
         except (openai.RateLimitError, openai.APITimeoutError) as exc:
             last_error = exc
+            logger.warning("Attempt %d/%d failed: %s: %s", attempt, max_attempts, type(exc).__name__, exc)
 
         if attempt < max_attempts:
             wait = (

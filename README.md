@@ -1,166 +1,230 @@
 # Evaluation Service
 
-LLM 评估平台的指标计算层。职责单一：接收单条 record，执行指标计算，同步返回结果，后台异步写执行日志。
+LLM 评估指标计算服务。每个评估指标对应一条独立 REST 端点，请求体按指标字段强类型校验。
 
-> **不感知** ETL、不感知调度、不感知中间表 ID 体系。
+## 架构
 
----
+```
+API 层（路由/存储） → Registry 层（发现/校验） → Metrics 层（纯评估逻辑）
+```
+
+- **Metrics 层**：每个 metric 是独立类，不继承基类，只依赖 `call_llm`
+- **Registry 层**：两级路由 — `EvaluatorRegistry`（按 type 分发）→ `MetricRegistry`（按 name 查找）
+- **API 层**：启动时遍历 registry 动态注册路由，负责 HTTP 协议、计时、持久化
 
 ## 快速开始
 
 ```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 配置环境变量
-cp .env.example .env
-# 填写 DB_BACKEND、SQLITE_DB_PATH、OPENAI_API_KEY 等
-
-# 初始化本地 SQLite（仅 DB_BACKEND=local 时需要）
-python -m app.db
-
-# 启动服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 运行测试（无需数据库 / 网络）
-pytest
+cp .env.example .env       # 填写 Azure OpenAI 配置
+python main.py             # 启动服务 → http://localhost:8000/docs
 ```
 
----
+## 环境变量
+
+| 变量 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `AZURE_OPENAI_API_KEY` | 是 | | Azure OpenAI API Key |
+| `AZURE_OPENAI_ENDPOINT` | 是 | | Azure OpenAI Endpoint |
+| `AZURE_OPENAI_API_VERSION` | 否 | `2025-01-01-preview` | API 版本 |
+| `LLM_MODEL` | 否 | `gpt-4.1` | 模型部署名 |
+| `LLM_TEMPERATURE` | 否 | `0.0` | 生成温度 |
+| `LLM_MAX_ATTEMPTS` | 否 | `3` | 最大重试次数 |
+| `DB_BACKEND` | 否 | `local` | 数据库后端（`local` / `azure`） |
+| `SQLITE_DB_PATH` | 否 | `data/evaluation.db` | SQLite 数据库路径 |
 
 ## 项目结构
 
 ```
 evaluation-service/
+├── main.py                              # 入口，uvicorn 启动
 ├── app/
-│   ├── main.py                      # FastAPI 初始化 + 全局异常处理
-│   ├── config.py                    # pydantic-settings 环境变量
-│   ├── exceptions.py                # EvaluationError 体系
-│   ├── api/v1/
-│   │   └── evaluate.py              # POST /evaluate · GET /health
+│   ├── api/v1/evaluate.py               # 动态路由注册 + 核心处理逻辑
 │   ├── evaluators/
-│   │   ├── __init__.py              # import 各 evaluator，触发注册
-│   │   ├── base.py                  # EvalRecord / EvalConfig / EvalResult / BaseEvaluator
-│   │   ├── registry.py              # EvaluatorRegistry 单例
-│   │   └── llm_judge_evaluator.py   # LLMJudgeEvaluator（含重试）
+│   │   ├── registry.py                  # EvaluatorRegistry + MetricRegistry
+│   │   ├── __init__.py                  # 注册 evaluator type
+│   │   ├── llm_judge/
+│   │   │   ├── Faithfulness.py          # 忠实度 metric + RequestModel
+│   │   │   ├── FactualCorrectness.py    # 事实正确性 metric + RequestModel
+│   │   │   ├── registry.py              # llm_judge 子 registry
+│   │   │   └── __init__.py              # 注册 metrics
+│   │   └── performance/                 # 预留，公式类 metric
 │   ├── models/
-│   │   ├── request.py               # EvaluateRequest（Pydantic v2）
-│   │   └── response.py              # EvaluateResponse / ErrorResponse
-│   ├── db/
-│   │   ├── models.py                # SQLAlchemy ORM：EvalLog · LLMCallLog
-│   │   ├── connection.py            # 本地 SQLite / Azure DB 连接选择
-│   │   ├── init_db.py               # 本地 SQLite 初始化脚本
-│   │   ├── __main__.py              # 支持 python -m app.db
-│   │   ├── README.md                # DB 配置与使用说明
-│   │   ├── eval_log_repo.py         # upsert_eval_log
-│   │   └── llm_call_log_repo.py     # insert_llm_call_log
-│   └── tasks/
-│       └── persist.py               # BackgroundTask：写 eval_log + llm_call_log
-├── migrations/
-│   ├── env.py                       # Alembic async env
-│   ├── script.py.mako
-│   └── versions/
-│       └── 0001_initial_schema.py   # 建表：eval_log · llm_call_log
-├── tests/
-│   ├── unit/
-│   │   ├── test_llm_judge.py        # LLMJudgeEvaluator 单元测试（mock LLM）
-│   │   └── test_registry.py        # EvaluatorRegistry 单元测试
-│   └── integration/
-│       └── test_evaluate_api.py     # 完整接口集成测试（mock LLM）
-├── pyproject.toml
-├── alembic.ini
-└── .env.example
+│   │   ├── request.py                   # 基础请求模型
+│   │   └── response.py                  # EvaluateResponse / MetricResult / ErrorResponse
+│   ├── db/                              # 数据持久化
+│   ├── tasks/persist.py                 # 后台写入 eval_log
+│   └── utils/                           # config、logger、llm_utils
+├── migrations/                          # Alembic 数据库迁移
+└── tests/
+    └── integration/test_evaluate_api.py # 集成测试（7/7）
 ```
-
----
 
 ## API
 
-### POST /api/v1/evaluation/evaluate
+### Health Check
 
-同步执行单条 record 的评估。
+```
+GET /api/v1/evaluation/health
+```
+
+```json
+{
+  "status": "ok",
+  "evaluators": {
+    "llm_judge": ["faithfulness", "factual_correctness"],
+    "performance": []
+  },
+  "version": "2.0.0"
+}
+```
+
+### 评估指标端点
+
+每个注册的 metric 自动生成一条独立路由：
+
+```
+POST /api/v1/evaluation/{evaluator_type}/{metric_name}
+```
+
+当前可用：
+
+| 端点 | 说明 |
+|------|------|
+| `POST /api/v1/evaluation/llm_judge/faithfulness` | 忠实度评估 |
+| `POST /api/v1/evaluation/llm_judge/factual_correctness` | 事实正确性评估 |
+
+### Faithfulness — 忠实度
+
+验证模型回答是否忠实于检索上下文，不臆造内容。
 
 **Request**
 
 ```json
 {
-  "eval_id": "550e8400-e29b-41d4-a716-446655440000",
-  "metric_type": "llm_judge",
-  "record": {
-    "input": "请解释什么是梯度下降",
-    "output": "梯度下降是一种优化算法...",
-    "reference": "梯度下降（Gradient Descent）是..."
+  "response": "梯度下降是一种优化算法",
+  "retrieved_contexts": "梯度下降（Gradient Descent）是一种用于最小化损失函数的优化算法",
+  "user_input": "请解释梯度下降"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `response` | 是 | 模型生成的回答 |
+| `retrieved_contexts` | 是 | 检索到的上下文 |
+| `user_input` | 否 | 用户的原始提问 |
+| `eval_id` | 否 | 评估 ID，不传自动生成 |
+
+### FactualCorrectness — 事实正确性
+
+通过 claim 分解和 NLI 验证，计算回答相对参考答案的 precision / recall / F1。
+
+**Request**
+
+```json
+{
+  "reference": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同",
+  "response": "国产乙肝疫苗与进口疫苗在安全性方面没有区别"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `reference` | 是 | 标准参考答案 |
+| `response` | 是 | 模型生成的回答 |
+| `eval_id` | 否 | 评估 ID，不传自动生成 |
+
+### 响应格式
+
+```json
+{
+  "eval_id": "54540f73-c2e7-4b69-9a0f-7b241282cda2",
+  "status": "success",
+  "result": {
+    "score": 1.0,
+    "reason": [
+      {
+        "statement": "梯度下降是一种优化算法。",
+        "reason": "上下文明确指出梯度下降是一种用于最小化损失函数的优化算法",
+        "verdict": 1
+      }
+    ]
   },
-  "eval_config": {
-    "judge_model": "gpt-4o",
-    "criteria": ["accuracy", "completeness", "clarity"],
-    "rubric": "评估回答是否准确、完整地解释了核心概念"
+  "metadata": {
+    "evaluator_type": "llm_judge",
+    "metric_name": "faithfulness",
+    "eval_latency_ms": 5047,
+    "evaluated_at": "2026-04-04T14:24:59.295911Z"
   }
 }
 ```
 
-**Response 200**
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `result.score` | `float` | 评估分数（0.0 ~ 1.0） |
+| `result.reason` | `any` | 评估详情，结构因 metric 而异 |
+| `metadata` | `object` | 运行上下文（类型、名称、耗时、时间） |
+
+### 错误响应
+
+| HTTP | error | 说明 |
+|------|-------|------|
+| 422 | Pydantic 校验 | 缺少必填字段或类型错误 |
+| 422 | `UNKNOWN_METRIC` | metric 未注册 |
+| 500 | `LLM_AUTH_ERROR` | Azure OpenAI 认证失败 |
+| 500 | `LLM_BAD_REQUEST` | LLM 请求参数错误 |
+| 503 | `LLM_RATE_LIMIT` | LLM 请求频率超限 |
+| 504 | `LLM_TIMEOUT` | LLM 请求超时 |
+| 500 | `INTERNAL_ERROR` | 未预期的内部错误 |
 
 ```json
 {
-  "eval_id": "550e8400-e29b-41d4-a716-446655440000",
-  "metric_type": "llm_judge",
-  "status": "success",
-  "score": 0.87,
-  "scores_detail": {"accuracy": 0.90, "completeness": 0.85, "clarity": 0.85},
-  "reasoning": "...",
-  "retry_count": 0,
-  "eval_latency_ms": 4312,
-  "evaluated_at": "2025-04-03T10:23:45.123Z"
+  "detail": {
+    "error": "ERROR_CODE",
+    "message": "Human-readable description",
+    "eval_id": "uuid"
+  }
 }
 ```
 
-| HTTP | error 字段 | 含义 | 可重试 |
-|------|-----------|------|-------|
-| 422 | `VALIDATION_ERROR` | Pydantic 校验失败 | ❌ |
-| 422 | `UNKNOWN_METRIC_TYPE` | metric_type 未注册 | ❌ |
-| 422 | `CONFIG_VALIDATION_ERROR` | metric 级别配置缺失 | ❌ |
-| 500 | `LLM_API_ERROR` | LLM API 错误（重试耗尽） | ✅ |
-| 500 | `LLM_TIMEOUT` | LLM 超时（重试耗尽） | ✅ |
-| 500 | `PARSE_ERROR` | LLM 返回无法解析 | ❌ |
+## 添加新 Metric
 
-### GET /api/v1/evaluation/health
+1. 在 `app/evaluators/llm_judge/` 下创建文件，定义 metric 类和 request model：
 
-```json
-{"status": "ok", "registered_evaluators": ["llm_judge"], "version": "1.0.0"}
+```python
+from pydantic import BaseModel, Field
+from uuid import UUID, uuid4
+from app.utils.llm_utils import call_llm
+
+class MyMetricRequest(BaseModel):
+    eval_id: UUID = Field(default_factory=uuid4)
+    input_text: str = Field(..., description="输入文本")
+
+class MyMetric:
+    name: str = "my_metric"
+    required_fields: list[str] = ["input_text"]
+    request_model = MyMetricRequest
+
+    async def evaluate(self, input_text: str) -> dict:
+        return {"score": 1.0, "reason": "looks good"}
 ```
 
----
+2. 在 `app/evaluators/llm_judge/__init__.py` 注册：
 
-## 新增 Evaluator
+```python
+llm_judge_registry.register(MyMetric())
+```
 
-1. 在 `app/evaluators/` 创建新文件，继承 `BaseEvaluator`，设置 `metric_type`，用 `@registry.register` 装饰
-2. 在 `app/evaluators/__init__.py` 添加 import 触发注册
-3. 在本 README 追加说明
-
----
-
-## 已注册 Evaluator
-
-### llm_judge
-
-| 属性 | 值 |
-|------|----|
-| `metric_type` | `llm_judge` |
-| 必填 eval_config | `judge_model`、`criteria` |
-| 支持 criteria | `accuracy` `completeness` `clarity` `relevance` `coherence`（可自定义） |
-| 重试策略 | 指数退避 3 次，等待 = min(2^n, 10)s ±0.5s |
-| 预期耗时 | 3–15 s（首次），含重试最长约 45 s |
-
----
+重启服务后自动生成 `POST /api/v1/evaluation/llm_judge/my_metric` 路由。
 
 ## 重试机制
 
+`call_llm` 内置指数退避重试：
+
 | 异常 | 重试 |
 |------|------|
-| `RateLimitError (429)` | ✅ |
-| `APITimeoutError` | ✅ |
-| `ServiceUnavailableError (503)` | ✅ |
-| `ParseError` | ❌ |
-| `AuthenticationError` | ❌ |
-| `BadRequestError (400)` | ❌ |
+| `RateLimitError (429)` | 是 |
+| `APITimeoutError` | 是 |
+| `APIStatusError (503)` | 是 |
+| `AuthenticationError` | 否 |
+| `BadRequestError (400)` | 否 |

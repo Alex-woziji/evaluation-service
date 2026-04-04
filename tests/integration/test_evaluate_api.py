@@ -77,13 +77,15 @@ async def test_evaluate_faithfulness_success(async_client, eval_id):
     assert resp.status_code == 200
     body = resp.json()
     assert body["eval_id"] == eval_id
-    assert body["evaluator_type"] == "llm_judge"
-    assert body["metric_name"] == "faithfulness"
     assert body["status"] == "success"
-    assert body["score"] == 0.5
-    assert body["eval_latency_ms"] >= 0
-    assert body["detail"] is not None
-    assert "reason" in body["detail"]
+    # result section
+    assert body["result"]["score"] == 0.5
+    assert "reason" in body["result"]
+    # metadata section
+    assert body["metadata"]["evaluator_type"] == "llm_judge"
+    assert body["metadata"]["metric_name"] == "faithfulness"
+    assert body["metadata"]["eval_latency_ms"] >= 0
+    assert "evaluated_at" in body["metadata"]
 
 
 # ── Validation errors (Pydantic catches these before handler) ──────────────────
@@ -96,7 +98,6 @@ async def test_faithfulness_missing_response_returns_422(async_client, eval_id):
     async with async_client as client:
         resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
     assert resp.status_code == 422
-    # FastAPI standard validation error — list of detail objects
     assert any("response" in str(e) for e in resp.json()["detail"])
 
 
@@ -111,14 +112,40 @@ async def test_factual_correctness_without_reference_returns_422(async_client, e
     assert any("reference" in str(e) for e in resp.json()["detail"])
 
 
-async def test_missing_eval_id_returns_422(async_client):
+async def test_auto_generated_eval_id(async_client):
+    """eval_id is optional — service generates one if not provided."""
     payload = {
         "response": "some text",
         "retrieved_contexts": "some context",
     }
-    async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
-    assert resp.status_code == 422
+    with patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock):
+        with patch(
+            "app.evaluators.llm_judge.Faithfulness.call_llm",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            stmt_resp = MagicMock()
+            stmt_resp.choices = [
+                MagicMock(message=MagicMock(parsed=MagicMock(statements=["stmt1"])))
+            ]
+            verdict_resp = MagicMock()
+            verdict_resp.choices = [
+                MagicMock(
+                    message=MagicMock(
+                        parsed=MagicMock(
+                            statements=[MagicMock(statement="stmt1", reason="ok", verdict=1)]
+                        )
+                    )
+                )
+            ]
+            mock_llm.side_effect = [stmt_resp, verdict_resp]
+
+            async with async_client as client:
+                resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["eval_id"] is not None
+    assert body["status"] == "success"
 
 
 # ── LLM error paths ────────────────────────────────────────────────────────────

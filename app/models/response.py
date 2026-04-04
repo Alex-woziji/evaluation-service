@@ -4,20 +4,28 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class MetricResult(BaseModel):
+    score: Optional[float] = None
+    reason: Optional[Any] = None
+
+    model_config = {"extra": "allow"}
+
+
+class EvalMetadata(BaseModel):
+    evaluator_type: str
+    metric_name: str
+    eval_latency_ms: int
+    evaluated_at: datetime
 
 
 class EvaluateResponse(BaseModel):
     eval_id: UUID
-    evaluator_type: str
-    metric_name: str
-    status: str  # "success"
-    score: Optional[float] = None
-
-    detail: Optional[Dict[str, Any]] = None
-    reasoning: Optional[Any] = None
-    eval_latency_ms: int
-    evaluated_at: datetime
+    status: str  # "success" | "failed"
+    result: Optional[MetricResult] = None
+    metadata: Optional[EvalMetadata] = None
 
 
 class ValidationErrorDetail(BaseModel):
