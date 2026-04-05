@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from app.evaluators import evaluator_registry  # noqa: F401 — ensure registration
 from app.models.response import ErrorResponse, EvalMetadata, EvaluateResponse, MetricResult, ValidationErrorDetail
 from app.tasks.persist import persist_eval_result
+from app.utils.llm_tracker import start_tracking, get_tracked_calls
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,6 +42,7 @@ async def _evaluate(
 
     # ── 2. Evaluate ─────────────────────────────────────────────────────────────
     start = time.monotonic()
+    start_tracking()
     try:
         result = await metric.evaluate(**record)
     except openai.AuthenticationError as exc:
@@ -64,6 +66,7 @@ async def _evaluate(
         _make_error(500, "INTERNAL_ERROR", "An unexpected error occurred", eval_id=eval_id)
 
     latency_s = round(time.monotonic() - start, 3)
+    llm_calls = get_tracked_calls()
 
     # ── 3. Build response ───────────────────────────────────────────────────────
     result_data = result if isinstance(result, dict) else {}
@@ -81,6 +84,7 @@ async def _evaluate(
         score=score,
         reason=reason,
         eval_latency_s=latency_s,
+        llm_calls=llm_calls,
     )
 
     # ── 5. Respond ──────────────────────────────────────────────────────────────

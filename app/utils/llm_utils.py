@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any
 
 import openai
@@ -11,6 +12,7 @@ from openai import AsyncAzureOpenAI
 from pydantic import BaseModel
 
 from app.utils.config import llm_settings
+from app.utils.llm_tracker import LLMCallRecord, record_call
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,7 +88,28 @@ async def call_llm(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            return await _call(**kwargs)
+            t0 = time.monotonic()
+            response = await _call(**kwargs)
+            elapsed = round(time.monotonic() - t0, 3)
+
+            # ── Track call metadata (no-op when not tracking) ──
+            raw = {
+                "content": response.choices[0].message.content,
+                "model": response.model,
+                "finish_reason": response.choices[0].finish_reason,
+            }
+            usage = response.usage
+            record_call(LLMCallRecord(
+                model=llm_settings.LLM_MODEL,
+                messages=messages,
+                raw_response=raw,
+                input_tokens=usage.prompt_tokens if usage else None,
+                output_tokens=usage.completion_tokens if usage else None,
+                latency_s=elapsed,
+                attempt_number=attempt,
+            ))
+
+            return response
 
         except openai.AuthenticationError:
             raise

@@ -1,4 +1,4 @@
-"""Initial schema: evaluation_result and llm_metadata
+"""Initial schema: evaluation_result, llm_metadata, llm_prompt
 
 Revision ID: 0001
 Revises:
@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("metric_type", sa.String(64), nullable=False),
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("score", sa.Float, nullable=True),
-        sa.Column("scores_detail", postgresql.JSONB, nullable=True),
+        sa.Column("reason", postgresql.JSONB, nullable=True),
         sa.Column("error_type", sa.String(64), nullable=True),
         sa.Column("error_message", sa.Text, nullable=True),
         sa.Column("eval_latency_s", sa.Float, nullable=True),
@@ -51,8 +51,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("judge_model", sa.String(128), nullable=False),
-        sa.Column("prompt_system", sa.Text, nullable=True),
-        sa.Column("prompt_user", sa.Text, nullable=True),
+        sa.Column("messages", postgresql.JSONB, nullable=True),
         sa.Column("raw_response", postgresql.JSONB, nullable=True),
         sa.Column("input_tokens", sa.Integer, nullable=True),
         sa.Column("output_tokens", sa.Integer, nullable=True),

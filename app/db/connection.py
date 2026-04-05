@@ -5,13 +5,14 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.utils.config import db_settings
+from app.utils.constants import DEFAULT_DB_PATH
 
 
 def _build_database_url() -> str:
     backend = db_settings.DB_BACKEND.strip().lower()
 
     if backend == "local":
-        db_path = Path(db_settings.SQLITE_DB_PATH)
+        db_path = Path(db_settings.SQLITE_DB_PATH) if db_settings.SQLITE_DB_PATH else DEFAULT_DB_PATH
         if not db_path.exists():
             raise FileNotFoundError(
                 f"Local SQLite database not found at '{db_path}'. "

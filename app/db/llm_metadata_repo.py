@@ -16,8 +16,7 @@ async def insert_llm_metadata(
     evaluation_result_id: UUID,
     judge_model: str,
     attempt_number: int,
-    prompt_system: Optional[str] = None,
-    prompt_user: Optional[str] = None,
+    messages: Optional[list[dict[str, str]]] = None,
     raw_response: Optional[Dict[str, Any]] = None,
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
@@ -26,8 +25,7 @@ async def insert_llm_metadata(
     log = LLMMetadata(
         evaluation_result_id=str(evaluation_result_id),
         judge_model=judge_model,
-        prompt_system=prompt_system,
-        prompt_user=prompt_user,
+        messages=messages,
         raw_response=raw_response,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -35,4 +33,3 @@ async def insert_llm_metadata(
         attempt_number=attempt_number,
     )
     session.add(log)
-    await session.commit()

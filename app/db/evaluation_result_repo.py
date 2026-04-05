@@ -53,5 +53,3 @@ async def upsert_evaluation_result(
         existing.error_message = error_message
         existing.eval_latency_s = eval_latency_s
         existing.evaluated_at = evaluated_at
-
-    await session.commit()

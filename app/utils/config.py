@@ -5,7 +5,7 @@ class DBSettings(BaseSettings):
     """Database configuration loaded from environment variables."""
 
     DB_BACKEND: str = "local"  # "local" | "azure"
-    SQLITE_DB_PATH: str = "data/evaluation.db"
+    SQLITE_DB_PATH: str = ""
     AZURE_DB_URL: str = "mock://placeholder"
 
     model_config = SettingsConfigDict(
