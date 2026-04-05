@@ -18,6 +18,7 @@ async def upsert_evaluation_result(
     metric_type: str,
     status: str,
     evaluated_at: datetime,
+    task_id: Optional[str] = None,
     metric_name: Optional[str] = None,
     score: Optional[float] = None,
     reason: Optional[Any] = None,
@@ -31,7 +32,8 @@ async def upsert_evaluation_result(
     if existing is None:
         session.add(
             EvaluationResult(
-                id=eval_id_str,
+                eval_id=eval_id_str,
+                task_id=task_id,
                 metric_type=metric_type,
                 metric_name=metric_name,
                 status=status,
@@ -44,6 +46,7 @@ async def upsert_evaluation_result(
             )
         )
     else:
+        existing.task_id = task_id
         existing.metric_type = metric_type
         existing.metric_name = metric_name
         existing.status = status

@@ -119,6 +119,17 @@ class EvaluatorRegistry:
         """Validate record fields for a specific metric."""
         self.get_sub_registry(evaluator_type).validate_record(name, record)
 
+    def find_metric(self, name: str) -> tuple[str, object]:
+        """Find a metric by name across all evaluator types.
+
+        Returns ``(evaluator_type, metric)``.
+        Raises ``KeyError`` if not found.
+        """
+        for eval_type, sub in self._sub_registries.items():
+            if name in sub._metrics:
+                return eval_type, sub._metrics[name]
+        raise KeyError(f"Metric {name!r} not found in any evaluator type")
+
     def list_types(self) -> list[str]:
         """Return all registered evaluator types."""
         return list(self._sub_registries)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
@@ -38,3 +38,33 @@ class ErrorResponse(BaseModel):
     message: Optional[str] = None
     detail: Optional[List[ValidationErrorDetail]] = None
     eval_id: Optional[UUID] = None
+
+
+# ── Batch models ──────────────────────────────────────────────────────────────
+
+
+class BatchEvaluateRequest(BaseModel):
+    """Request model for batch evaluation."""
+
+    task_id: UUID = Field(default_factory=uuid4, description="Task ID shared across all metrics in the batch, auto-generated if not provided")
+    metrics: List[str] = Field(..., min_length=1, description="List of metric names to evaluate concurrently")
+    test_case: Dict[str, Any] = Field(..., description="Loose dict containing fields for all metrics")
+
+
+class BatchItemResult(BaseModel):
+    """Per-metric result within a batch response."""
+
+    eval_id: UUID
+    metric_name: str
+    status: str  # "success" | "failed"
+    result: Optional[MetricResult] = None
+    metadata: Optional[EvalMetadata] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+
+class BatchEvaluateResponse(BaseModel):
+    """Response model for batch evaluation."""
+
+    task_id: UUID
+    results: List[BatchItemResult]

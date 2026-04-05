@@ -25,7 +25,8 @@ class Base(DeclarativeBase):
 class EvaluationResult(Base):
     __tablename__ = "evaluation_result"
 
-    id = Column(String(36), primary_key=True)  # = eval_id passed in by scheduler
+    eval_id = Column(String(36), primary_key=True)  # = eval_id passed in by scheduler
+    task_id = Column(String(36), nullable=True, index=True)  # shared across metrics in a batch
     metric_type = Column(String(64), nullable=False)  # evaluator_type (e.g. "llm_judge")
     metric_name = Column(String(64), nullable=True)  # e.g. "faithfulness"
     status = Column(String(16), nullable=False)  # "success" | "failed"
@@ -44,8 +45,8 @@ class EvaluationResult(Base):
 class LLMMetadata(Base):
     __tablename__ = "llm_metadata"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    evaluation_result_id = Column(String(36), ForeignKey("evaluation_result.id"), nullable=False)
+    metadata_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    evaluation_result_id = Column(String(36), ForeignKey("evaluation_result.eval_id"), nullable=False)
     judge_model = Column(String(128), nullable=False)
     messages = Column(JSON, nullable=True)
     raw_response = Column(JSON, nullable=True)
