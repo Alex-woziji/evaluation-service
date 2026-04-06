@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.models.response import LLMConfig
+    from app.models.request import LLMConfig
 
 
 @dataclass

@@ -8,15 +8,14 @@ import openai
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.evaluators import evaluator_registry  # noqa: F401 — ensure registration
+from app.models.request import BatchEvaluateRequest, LLMConfig, ValidationErrorDetail
 from app.models.response import (
-    BatchEvaluateRequest,
     BatchEvaluateResponse,
     BatchItemResult,
     ErrorResponse,
     EvalMetadata,
     EvaluateResponse,
     MetricResult,
-    ValidationErrorDetail,
 )
 from app.tasks.persist import persist_eval_result
 from app.utils.llm_tracker import get_tracked_calls, set_config_override, start_tracking
