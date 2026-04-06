@@ -12,7 +12,7 @@ from openai import AsyncAzureOpenAI
 from pydantic import BaseModel
 
 from app.utils.config import llm_settings
-from app.utils.llm_tracker import LLMCallRecord, record_call
+from app.utils.llm_tracker import LLMCallRecord, get_config_override, record_call
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,10 +71,15 @@ async def call_llm(
     """
     client = get_llm_client()
 
+    # Priority: API param override > env var > default
+    override = get_config_override()
+    _model = override.model if override and override.model else llm_settings.LLM_MODEL
+    _temperature = override.temperature if override and override.temperature is not None else llm_settings.LLM_TEMPERATURE
+
     kwargs: dict[str, Any] = {
-        "model": llm_settings.LLM_MODEL,
+        "model": _model,
         "messages": messages,
-        "temperature": llm_settings.LLM_TEMPERATURE,
+        "temperature": _temperature,
     }
     if response_format is not None:
         kwargs["response_format"] = response_format
@@ -100,7 +105,7 @@ async def call_llm(
             }
             usage = response.usage
             record_call(LLMCallRecord(
-                model=llm_settings.LLM_MODEL,
+                model=_model,
                 messages=messages,
                 raw_response=raw,
                 input_tokens=usage.prompt_tokens if usage else None,

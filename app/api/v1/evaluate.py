@@ -19,7 +19,7 @@ from app.models.response import (
     ValidationErrorDetail,
 )
 from app.tasks.persist import persist_eval_result
-from app.utils.llm_tracker import get_tracked_calls, start_tracking
+from app.utils.llm_tracker import get_tracked_calls, set_config_override, start_tracking
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,6 +41,7 @@ async def _evaluate_single(
     record: dict,
     background_tasks: BackgroundTasks,
     task_id: Optional[str] = None,
+    llm_config: Any = None,
 ) -> BatchItemResult:
     """Run one metric evaluation. Always returns a result, never raises."""
     evaluated_at = datetime.now(tz=timezone.utc)
@@ -58,6 +59,7 @@ async def _evaluate_single(
     # ── 2. Evaluate ─────────────────────────────────────────────────────────
     start = time.monotonic()
     start_tracking()
+    set_config_override(llm_config)
     try:
         result = await metric.evaluate(**record)
     except openai.AuthenticationError as exc:
@@ -79,6 +81,8 @@ async def _evaluate_single(
         logger.exception("Unexpected error for eval_id=%s", eval_id)
         _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "INTERNAL_ERROR", str(exc), task_id=task_id)
         return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="INTERNAL_ERROR", message="An unexpected error occurred")
+    finally:
+        set_config_override(None)
 
     latency_s = round(time.monotonic() - start, 3)
     llm_calls = get_tracked_calls()

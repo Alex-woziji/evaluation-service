@@ -2,12 +2,17 @@ import asyncio
 
 import yaml
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID, uuid4
 
 from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
+
+if TYPE_CHECKING:
+    from app.models.response import LLMConfig
+
+from app.models.response import LLMConfig
 
 with open(PROMPT_DIR, "r", encoding="utf-8") as f:
     _prompt_config = yaml.safe_load(f)
@@ -51,6 +56,7 @@ class FaithfulnessRequest(BaseModel):
     response: str = Field(..., examples=["Gradient descent is an optimization algorithm"], description="Model-generated answer")
     retrieved_contexts: str = Field(..., examples=["Gradient Descent is an optimization algorithm used to minimize a loss function"], description="Retrieved context")
     user_input: Optional[str] = Field(None, examples=["Please explain gradient descent"], description="Original user question")
+    llm_config: Optional["LLMConfig"] = Field(None, description="Per-request LLM config override (model, temperature)")
 
 
 class Faithfulness:
