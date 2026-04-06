@@ -12,7 +12,7 @@ Three layers with one-way dependencies — no backward references:
 
 - **Metrics Layer**: Each metric is a standalone plain class with no base class inheritance, depending only on `call_llm`. It defines its own `required_fields`, `request_model`, and returns `{"score", "reason"}`
 - **Registry Layer**: Two-level routing — `EvaluatorRegistry` (dispatches by evaluator_type) → `MetricRegistry` (looks up by name). Duck-typing validation; auto-registers on import
-- **API Layer**: Single-metric routes (dynamically registered at startup) + batch route (`asyncio.gather` concurrency). Handles HTTP protocol, LLM call tracking, timing, and background persistence
+- **API Layer**: Single-metric routes (dynamically registered at startup) + batch route (`asyncio.gather` concurrency). Handles HTTP protocol, per-request LLM config override (`ContextVar`), LLM call tracking, timing, and background persistence
 
 ### Data Flow
 
@@ -28,7 +28,8 @@ POST /llm_judge/faithfulness               POST /batch
        │                                   │      │
        ├─ resolve metric                    ├─ extract fields from test_case
        ├─ start_tracking()                  ├─ resolve metric
-       ├─ metric.evaluate()                 ├─ start_tracking() (each with independent ContextVar)
+       ├─ set_config_override()             ├─ start_tracking() (each with independent ContextVar)
+       ├─ metric.evaluate()                 ├─ set_config_override()
        ├─ get_tracked_calls()               ├─ metric.evaluate()
        └─ persist (background)              └─ persist (background)
 ```
@@ -73,6 +74,7 @@ evaluation-service/
 │   │   │   └── __init__.py                  # Register metrics (auto-register on import)
 │   │   └── performance/                     # Placeholder for formula-based metrics
 │   ├── models/
+│   │   ├── request.py                       # LLMConfig / BatchEvaluateRequest / ValidationErrorDetail
 │   │   └── response.py                      # EvaluateResponse / Batch* / ErrorResponse
 │   ├── db/
 │   │   ├── models.py                        # SQLAlchemy ORM (EvaluationResult, LLMMetadata)
@@ -86,7 +88,7 @@ evaluation-service/
 │       ├── config.py                        # DBSettings / LLMSettings / AppSettings
 │       ├── constants.py                     # PROJECT_ROOT, PROMPT_DIR, DEFAULT_DB_PATH
 │       ├── llm_utils.py                     # get_llm_client() + call_llm() (built-in retry)
-│       ├── llm_tracker.py                   # ContextVar for tracking LLM call metadata
+│       ├── llm_tracker.py                   # ContextVar for LLM call tracking + per-request config override
 │       └── logger.py                        # get_logger()
 ├── resource/prompt/prompt.yaml              # LLM prompt templates
 ├── tests/
@@ -148,6 +150,7 @@ Verifies whether the model answer is faithful to the retrieved context without h
 | `retrieved_contexts` | Yes | Retrieved context |
 | `user_input` | No | Original user question |
 | `eval_id` | No | Evaluation ID, auto-generated UUID if not provided |
+| `llm_config` | No | Per-request LLM config override (`model`, `temperature`) |
 
 #### FactualCorrectness
 
@@ -167,6 +170,7 @@ Calculates precision / recall / F1 of the answer against the reference via claim
 | `reference` | Yes | Ground truth reference |
 | `response` | Yes | Model-generated answer |
 | `eval_id` | No | Evaluation ID, auto-generated UUID if not provided |
+| `llm_config` | No | Per-request LLM config override (`model`, `temperature`) |
 
 ### Batch Endpoint
 
@@ -196,6 +200,7 @@ POST /api/v1/evaluation/batch
 | `metrics` | Yes | List of metric names to evaluate, at least 1 |
 | `test_case` | Yes | Loose dict containing fields that any metric might need. Each metric automatically extracts only the fields it requires |
 | `task_id` | No | Task ID shared across all metrics in the batch, auto-generated UUID if not provided |
+| `llm_config` | No | Per-request LLM config override, applies to all metrics in the batch (`model`, `temperature`) |
 
 **Response**
 
@@ -327,18 +332,38 @@ Each evaluation automatically tracks all LLM calls via `ContextVar`:
 
 In batch mode, each metric runs in an independent task within `asyncio.gather`, each with its own `ContextVar` copy — no cross-contamination.
 
+### LLM Config Override
+
+Both single-metric and batch endpoints accept an optional `llm_config` field to override model settings per-request:
+
+```json
+{
+  "llm_config": {
+    "model": "gpt-4.1",
+    "temperature": 0.3
+  }
+}
+```
+
+Priority: **API param** > **env var** (`LLM_MODEL` / `LLM_TEMPERATURE`) > **default**
+
+The override is injected transparently via `ContextVar` (`set_config_override` / `get_config_override`) — metric code is unaware of it. Each concurrent metric in a batch gets its own isolated config copy.
+
 ## Adding a New Metric
 
 1. Create a file under `app/evaluators/llm_judge/`:
 
 ```python
+from typing import Optional
 from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 from app.utils.llm_utils import call_llm
+from app.models.request import LLMConfig
 
 class MyMetricRequest(BaseModel):
     eval_id: UUID = Field(default_factory=uuid4)
     input_text: str = Field(..., description="Input text")
+    llm_config: Optional[LLMConfig] = Field(None, description="Per-request LLM config override")
 
 class MyMetric:
     name: str = "my_metric"
