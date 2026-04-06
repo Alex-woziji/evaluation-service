@@ -1,97 +1,97 @@
 # Evaluation Service
 
-LLM 评估指标计算服务。提供两类 API：单指标端点（Swagger 友好）和批量并发端点。
+LLM evaluation metric calculation service. Provides two API types: single-metric endpoints (Swagger-friendly) and a batch concurrent endpoint.
 
-## 架构
-
-```
-API 层（路由/存储） → Registry 层（发现/校验） → Metrics 层（纯评估逻辑）
-```
-
-三层单向依赖，不可反向：
-
-- **Metrics 层**：每个 metric 是独立朴素类，不继承基类，只依赖 `call_llm`。定义自己的 `required_fields`、`request_model`，返回 `{"score", "reason"}`
-- **Registry 层**：两级路由 — `EvaluatorRegistry`（按 evaluator_type 分发）→ `MetricRegistry`（按 name 查找）。Duck typing 校验，import 即注册
-- **API 层**：单指标路由（启动时动态注册）+ 批量路由（`asyncio.gather` 并发）。负责 HTTP 协议、LLM 调用追踪、计时、后台持久化
-
-### 数据流
+## Architecture
 
 ```
-单指标请求                           批量请求
-POST /llm_judge/faithfulness        POST /batch
-       │                                  │
-       ▼                                  ▼
-  _build_handler()                  batch_evaluate()
-       │                            ┌─┴─┴─┐
-       ▼                            │      │
-  _evaluate_single()            _evaluate_single() ×N (asyncio.gather 并发)
-       │                            │      │
-       ├─ resolve metric             ├─ 从 test_case 提取字段
-       ├─ start_tracking()           ├─ resolve metric
-       ├─ metric.evaluate()          ├─ start_tracking() (各独立 ContextVar)
-       ├─ get_tracked_calls()        ├─ metric.evaluate()
-       └─ persist (background)       └─ persist (background)
+API Layer (Routes / Persistence) → Registry Layer (Discovery / Validation) → Metrics Layer (Pure Evaluation Logic)
 ```
 
-## 快速开始
+Three layers with one-way dependencies — no backward references:
+
+- **Metrics Layer**: Each metric is a standalone plain class with no base class inheritance, depending only on `call_llm`. It defines its own `required_fields`, `request_model`, and returns `{"score", "reason"}`
+- **Registry Layer**: Two-level routing — `EvaluatorRegistry` (dispatches by evaluator_type) → `MetricRegistry` (looks up by name). Duck-typing validation; auto-registers on import
+- **API Layer**: Single-metric routes (dynamically registered at startup) + batch route (`asyncio.gather` concurrency). Handles HTTP protocol, LLM call tracking, timing, and background persistence
+
+### Data Flow
+
+```
+Single-metric request                      Batch request
+POST /llm_judge/faithfulness               POST /batch
+       │                                         │
+       ▼                                         ▼
+  _build_handler()                         batch_evaluate()
+       │                                   ┌─┴─┴─┐
+       ▼                                   │      │
+  _evaluate_single()                   _evaluate_single() ×N (asyncio.gather concurrent)
+       │                                   │      │
+       ├─ resolve metric                    ├─ extract fields from test_case
+       ├─ start_tracking()                  ├─ resolve metric
+       ├─ metric.evaluate()                 ├─ start_tracking() (each with independent ContextVar)
+       ├─ get_tracked_calls()               ├─ metric.evaluate()
+       └─ persist (background)              └─ persist (background)
+```
+
+## Quick Start
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env         # 填写 Azure OpenAI 配置
-python -m app.db             # 首次建表（仅 local 模式需要）
-python main.py               # 启动服务 → http://localhost:8000/docs
+cp .env.example .env         # fill in Azure OpenAI config
+python -m app.db             # initial table creation (local mode only)
+python main.py               # start the service → http://localhost:8000/docs
 ```
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `AZURE_OPENAI_API_KEY` | 是 | | Azure OpenAI API Key |
-| `AZURE_OPENAI_ENDPOINT` | 是 | | Azure OpenAI Endpoint |
-| `AZURE_OPENAI_API_VERSION` | 否 | `2025-01-01-preview` | API 版本 |
-| `LLM_MODEL` | 否 | `gpt-4.1` | 模型部署名 |
-| `LLM_TEMPERATURE` | 否 | `0.0` | 生成温度 |
-| `LLM_MAX_ATTEMPTS` | 否 | `3` | LLM 调用最大重试次数（含首次） |
-| `DB_BACKEND` | 否 | `local` | 数据库后端（`local` / `azure`） |
-| `SQLITE_DB_PATH` | 否 | `data/evaluation.db` | SQLite 路径（仅 local 模式） |
-| `LOG_LEVEL` | 否 | `INFO` | 日志级别 |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AZURE_OPENAI_API_KEY` | Yes | | Azure OpenAI API Key |
+| `AZURE_OPENAI_ENDPOINT` | Yes | | Azure OpenAI Endpoint |
+| `AZURE_OPENAI_API_VERSION` | No | `2025-01-01-preview` | API version |
+| `LLM_MODEL` | No | `gpt-4.1` | Model deployment name |
+| `LLM_TEMPERATURE` | No | `0.0` | Generation temperature |
+| `LLM_MAX_ATTEMPTS` | No | `3` | Max LLM call retry attempts (including first) |
+| `DB_BACKEND` | No | `local` | Database backend (`local` / `azure`) |
+| `SQLITE_DB_PATH` | No | `data/evaluation.db` | SQLite path (local mode only) |
+| `LOG_LEVEL` | No | `INFO` | Log level |
 
-## 项目结构
+## Project Structure
 
 ```
 evaluation-service/
-├── main.py                                  # 入口，FastAPI + uvicorn
+├── main.py                                  # Entry point, FastAPI + uvicorn
 ├── app/
-│   ├── api/v1/evaluate.py                   # 路由：单指标动态路由 + /batch + /health
+│   ├── api/v1/evaluate.py                   # Routes: single-metric dynamic routes + /batch + /health
 │   ├── evaluators/
 │   │   ├── registry.py                      # EvaluatorRegistry + MetricRegistry + find_metric()
-│   │   ├── __init__.py                      # 注册 evaluator type 到顶层
+│   │   ├── __init__.py                      # Register evaluator types to top-level
 │   │   ├── llm_judge/
-│   │   │   ├── Faithfulness.py              # 忠实度 metric + FaithfulnessRequest
-│   │   │   ├── FactualCorrectness.py        # 事实正确性 metric + FactualCorrectnessRequest
-│   │   │   ├── registry.py                  # llm_judge 子 registry
-│   │   │   └── __init__.py                  # 注册 metrics（import 即注册）
-│   │   └── performance/                     # 预留，公式类 metric
+│   │   │   ├── Faithfulness.py              # Faithfulness metric + FaithfulnessRequest
+│   │   │   ├── FactualCorrectness.py        # Factual Correctness metric + FactualCorrectnessRequest
+│   │   │   ├── registry.py                  # llm_judge sub-registry
+│   │   │   └── __init__.py                  # Register metrics (auto-register on import)
+│   │   └── performance/                     # Placeholder for formula-based metrics
 │   ├── models/
 │   │   └── response.py                      # EvaluateResponse / Batch* / ErrorResponse
 │   ├── db/
-│   │   ├── models.py                        # SQLAlchemy ORM（EvaluationResult, LLMMetadata）
-│   │   ├── connection.py                    # 异步引擎 + session 工厂
-│   │   ├── init_db.py                       # python -m app.db 建表入口
+│   │   ├── models.py                        # SQLAlchemy ORM (EvaluationResult, LLMMetadata)
+│   │   ├── connection.py                    # Async engine + session factory
+│   │   ├── init_db.py                       # python -m app.db table creation entry point
 │   │   ├── evaluation_result_repo.py        # upsert evaluation_result
 │   │   └── llm_metadata_repo.py             # insert llm_metadata
 │   ├── tasks/
-│   │   └── persist.py                       # 后台写入 evaluation_result + llm_metadata
+│   │   └── persist.py                       # Background write for evaluation_result + llm_metadata
 │   └── utils/
 │       ├── config.py                        # DBSettings / LLMSettings / AppSettings
 │       ├── constants.py                     # PROJECT_ROOT, PROMPT_DIR, DEFAULT_DB_PATH
-│       ├── llm_utils.py                     # get_llm_client() + call_llm()（内置重试）
-│       ├── llm_tracker.py                   # ContextVar 追踪 LLM 调用元数据
+│       ├── llm_utils.py                     # get_llm_client() + call_llm() (built-in retry)
+│       ├── llm_tracker.py                   # ContextVar for tracking LLM call metadata
 │       └── logger.py                        # get_logger()
-├── resource/prompt/prompt.yaml              # LLM prompt 模板
+├── resource/prompt/prompt.yaml              # LLM prompt templates
 ├── tests/
-│   └── integration/test_evaluate_api.py     # 集成测试
-└── docs/task.md                             # 重构进度追踪
+│   └── integration/test_evaluate_api.py     # Integration tests
+└── docs/task.md                             # Refactoring progress tracking
 ```
 
 ## API
@@ -113,64 +113,64 @@ GET /api/v1/evaluation/health
 }
 ```
 
-### 单指标端点
+### Single-Metric Endpoints
 
-每个注册的 metric 自动生成一条独立路由：
+Each registered metric auto-generates a dedicated route:
 
 ```
 POST /api/v1/evaluation/{evaluator_type}/{metric_name}
 ```
 
-当前可用：
+Currently available:
 
-| 端点 | 说明 |
-|------|------|
-| `POST /api/v1/evaluation/llm_judge/faithfulness` | 忠实度评估 |
-| `POST /api/v1/evaluation/llm_judge/factual_correctness` | 事实正确性评估 |
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/v1/evaluation/llm_judge/faithfulness` | Faithfulness evaluation |
+| `POST /api/v1/evaluation/llm_judge/factual_correctness` | Factual Correctness evaluation |
 
-#### Faithfulness — 忠实度
+#### Faithfulness
 
-验证模型回答是否忠实于检索上下文，不臆造内容。
-
-**Request**
-
-```json
-{
-  "response": "梯度下降是一种优化算法",
-  "retrieved_contexts": "梯度下降（Gradient Descent）是一种用于最小化损失函数的优化算法",
-  "user_input": "请解释梯度下降"
-}
-```
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `response` | 是 | 模型生成的回答 |
-| `retrieved_contexts` | 是 | 检索到的上下文 |
-| `user_input` | 否 | 用户的原始提问 |
-| `eval_id` | 否 | 评估 ID，不传自动生成 UUID |
-
-#### FactualCorrectness — 事实正确性
-
-通过 claim 分解和 NLI 双向验证，计算回答相对参考答案的 precision / recall / F1。
+Verifies whether the model answer is faithful to the retrieved context without hallucination.
 
 **Request**
 
 ```json
 {
-  "reference": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同",
-  "response": "国产乙肝疫苗与进口疫苗在安全性方面没有区别"
+  "response": "Gradient descent is an optimization algorithm",
+  "retrieved_contexts": "Gradient Descent is an optimization algorithm used to minimize loss functions",
+  "user_input": "Please explain gradient descent"
 }
 ```
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `reference` | 是 | 标准参考答案 |
-| `response` | 是 | 模型生成的回答 |
-| `eval_id` | 否 | 评估 ID，不传自动生成 UUID |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `response` | Yes | Model-generated answer |
+| `retrieved_contexts` | Yes | Retrieved context |
+| `user_input` | No | Original user question |
+| `eval_id` | No | Evaluation ID, auto-generated UUID if not provided |
 
-### 批量端点
+#### FactualCorrectness
 
-一次请求评估多个指标，所有指标并发执行（`asyncio.gather`）。
+Calculates precision / recall / F1 of the answer against the reference via claim decomposition and bidirectional NLI verification.
+
+**Request**
+
+```json
+{
+  "reference": "Domestic and imported hepatitis B vaccines are identical in safety and efficacy",
+  "response": "There is no difference in safety between domestic and imported hepatitis B vaccines"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `reference` | Yes | Ground truth reference |
+| `response` | Yes | Model-generated answer |
+| `eval_id` | No | Evaluation ID, auto-generated UUID if not provided |
+
+### Batch Endpoint
+
+Evaluate multiple metrics in a single request; all metrics execute concurrently (`asyncio.gather`).
 
 ```
 POST /api/v1/evaluation/batch
@@ -183,19 +183,19 @@ POST /api/v1/evaluation/batch
   "task_id": "550e8400-e29b-41d4-a716-446655440000",
   "metrics": ["faithfulness", "factual_correctness"],
   "test_case": {
-    "response": "国产乙肝疫苗与进口疫苗在安全性方面没有区别",
-    "retrieved_contexts": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同",
-    "reference": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同",
-    "user_input": "请解释国产和进口乙肝疫苗的区别"
+    "response": "There is no difference in safety between domestic and imported hepatitis B vaccines",
+    "retrieved_contexts": "Domestic and imported hepatitis B vaccines are identical in safety and efficacy",
+    "reference": "Domestic and imported hepatitis B vaccines are identical in safety and efficacy",
+    "user_input": "Please explain the difference between domestic and imported hepatitis B vaccines"
   }
 }
 ```
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `metrics` | 是 | 要评估的指标名称列表，至少 1 个 |
-| `test_case` | 是 | 宽松 dict，包含所有指标可能需要的字段。每个指标自动从中提取自己需要的字段 |
-| `task_id` | 否 | 任务 ID，同批次内所有指标共享，不传自动生成 UUID |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `metrics` | Yes | List of metric names to evaluate, at least 1 |
+| `test_case` | Yes | Loose dict containing fields that any metric might need. Each metric automatically extracts only the fields it requires |
+| `task_id` | No | Task ID shared across all metrics in the batch, auto-generated UUID if not provided |
 
 **Response**
 
@@ -231,9 +231,9 @@ POST /api/v1/evaluation/batch
 }
 ```
 
-每个指标结果独立：某个指标失败不影响其他指标，失败的条目会包含 `error` 和 `message` 字段。
+Each metric result is independent: a failure in one metric does not affect others. Failed entries include `error` and `message` fields.
 
-### 响应格式（单指标）
+### Response Format (Single Metric)
 
 ```json
 {
@@ -252,25 +252,25 @@ POST /api/v1/evaluation/batch
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `result.score` | `float` | 评估分数（0.0 ~ 1.0） |
-| `result.reason` | `any` | 评估详情，结构因 metric 而异 |
-| `metadata.eval_latency_s` | `float` | 评估总耗时（秒） |
+| Field | Type | Description |
+|-------|------|-------------|
+| `result.score` | `float` | Evaluation score (0.0 ~ 1.0) |
+| `result.reason` | `any` | Evaluation details, structure varies by metric |
+| `metadata.eval_latency_s` | `float` | Total evaluation latency (seconds) |
 
-### 错误响应
+### Error Responses
 
-| HTTP | error | 说明 |
-|------|-------|------|
-| 422 | Pydantic 校验 | 缺少必填字段或类型错误 |
-| 422 | `VALIDATION_ERROR` | 批量请求中存在未知指标或缺失字段 |
-| 422 | `UNKNOWN_METRIC` | 指标未注册 |
-| 500 | `LLM_AUTH_ERROR` | Azure OpenAI 认证失败 |
-| 500 | `LLM_BAD_REQUEST` | LLM 请求参数错误 |
-| 500 | `METRIC_ERROR` | 指标内部逻辑错误 |
-| 503 | `LLM_RATE_LIMIT` | LLM 请求频率超限 |
-| 504 | `LLM_TIMEOUT` | LLM 请求超时 |
-| 500 | `INTERNAL_ERROR` | 未预期的内部错误 |
+| HTTP | error | Description |
+|------|-------|-------------|
+| 422 | Pydantic validation | Missing required fields or type errors |
+| 422 | `VALIDATION_ERROR` | Unknown metrics or missing fields in batch request |
+| 422 | `UNKNOWN_METRIC` | Metric not registered |
+| 500 | `LLM_AUTH_ERROR` | Azure OpenAI authentication failed |
+| 500 | `LLM_BAD_REQUEST` | Bad request parameters to LLM |
+| 500 | `METRIC_ERROR` | Metric internal logic error |
+| 503 | `LLM_RATE_LIMIT` | LLM rate limit exceeded |
+| 504 | `LLM_TIMEOUT` | LLM request timeout |
+| 500 | `INTERNAL_ERROR` | Unexpected internal error |
 
 ```json
 {
@@ -282,54 +282,54 @@ POST /api/v1/evaluation/batch
 }
 ```
 
-## 数据库
+## Database
 
-两张表，后台异步写入，写失败不影响 HTTP 响应。
+Two tables, written asynchronously in the background. Write failures do not affect HTTP responses.
 
 ### evaluation_result
 
-| 列 | 类型 | 说明 |
-|----|------|------|
-| `eval_id` | VARCHAR(36) PK | 评估 ID |
-| `task_id` | VARCHAR(36) | 批量任务 ID（批量请求共享，单指标请求为空） |
-| `metric_type` | VARCHAR(64) | 评估器类型，如 `llm_judge` |
-| `metric_name` | VARCHAR(64) | 指标名称，如 `faithfulness` |
+| Column | Type | Description |
+|--------|------|-------------|
+| `eval_id` | VARCHAR(36) PK | Evaluation ID |
+| `task_id` | VARCHAR(36) | Batch task ID (shared in batch requests, empty for single-metric requests) |
+| `metric_type` | VARCHAR(64) | Evaluator type, e.g. `llm_judge` |
+| `metric_name` | VARCHAR(64) | Metric name, e.g. `faithfulness` |
 | `status` | VARCHAR(16) | `success` / `failed` |
-| `score` | FLOAT | 评估分数 |
-| `reason` | JSON | 评估详情 |
-| `error_type` | VARCHAR(64) | 失败时的错误类型 |
-| `error_message` | TEXT | 失败时的错误描述 |
-| `eval_latency_s` | FLOAT | 评估总耗时（秒） |
-| `evaluated_at` | TIMESTAMPTZ | 评估完成时间 |
+| `score` | FLOAT | Evaluation score |
+| `reason` | JSON | Evaluation details |
+| `error_type` | VARCHAR(64) | Error type on failure |
+| `error_message` | TEXT | Error description on failure |
+| `eval_latency_s` | FLOAT | Total evaluation latency (seconds) |
+| `evaluated_at` | TIMESTAMPTZ | Evaluation completion time |
 
 ### llm_metadata
 
-| 列 | 类型 | 说明 |
-|----|------|------|
-| `metadata_id` | VARCHAR(36) PK | 自生成 UUID |
-| `evaluation_result_id` | VARCHAR(36) FK | 关联 evaluation_result.eval_id |
-| `judge_model` | VARCHAR(128) | 使用的模型 |
-| `messages` | JSON | 完整对话消息 `[{role, content}]` |
-| `raw_response` | JSON | LLM 原始返回 `{content, model, finish_reason}` |
-| `input_tokens` | INTEGER | 输入 token 数 |
-| `output_tokens` | INTEGER | 输出 token 数 |
-| `llm_latency_s` | FLOAT | 单次 LLM 调用耗时（秒） |
-| `attempt_number` | SMALLINT | 第几次尝试 |
+| Column | Type | Description |
+|--------|------|-------------|
+| `metadata_id` | VARCHAR(36) PK | Auto-generated UUID |
+| `evaluation_result_id` | VARCHAR(36) FK | References evaluation_result.eval_id |
+| `judge_model` | VARCHAR(128) | Model used |
+| `messages` | JSON | Full conversation messages `[{role, content}]` |
+| `raw_response` | JSON | Raw LLM response `{content, model, finish_reason}` |
+| `input_tokens` | INTEGER | Input token count |
+| `output_tokens` | INTEGER | Output token count |
+| `llm_latency_s` | FLOAT | Single LLM call latency (seconds) |
+| `attempt_number` | SMALLINT | Attempt number |
 
-### LLM 调用追踪
+### LLM Call Tracking
 
-每次评估通过 `ContextVar` 自动追踪所有 LLM 调用：
+Each evaluation automatically tracks all LLM calls via `ContextVar`:
 
-1. `_evaluate_single` 调用 `start_tracking()` 初始化
-2. `call_llm()` 内部每次调用自动 `record_call()`
-3. 评估结束后 `get_tracked_calls()` 取出全部记录
-4. 后台任务将 evaluation_result + 所有 llm_metadata 一次 commit
+1. `_evaluate_single` calls `start_tracking()` to initialize
+2. `call_llm()` automatically calls `record_call()` on each invocation
+3. After evaluation, `get_tracked_calls()` retrieves all records
+4. Background task commits evaluation_result + all llm_metadata in one transaction
 
-批量模式下，`asyncio.gather` 内每个指标在独立 task 中运行，各自拥有独立的 `ContextVar` 副本，互不干扰。
+In batch mode, each metric runs in an independent task within `asyncio.gather`, each with its own `ContextVar` copy — no cross-contamination.
 
-## 添加新 Metric
+## Adding a New Metric
 
-1. 在 `app/evaluators/llm_judge/` 下创建文件：
+1. Create a file under `app/evaluators/llm_judge/`:
 
 ```python
 from pydantic import BaseModel, Field
@@ -338,50 +338,50 @@ from app.utils.llm_utils import call_llm
 
 class MyMetricRequest(BaseModel):
     eval_id: UUID = Field(default_factory=uuid4)
-    input_text: str = Field(..., description="输入文本")
+    input_text: str = Field(..., description="Input text")
 
 class MyMetric:
     name: str = "my_metric"
     required_fields: list[str] = ["input_text"]
-    optional_fields: list[str] = []       # 可选
+    optional_fields: list[str] = []       # optional
     request_model = MyMetricRequest
 
     async def evaluate(self, input_text: str) -> dict:
         return {"score": 1.0, "reason": "looks good"}
 ```
 
-2. 在 `app/evaluators/llm_judge/__init__.py` 注册：
+2. Register in `app/evaluators/llm_judge/__init__.py`:
 
 ```python
 llm_judge_registry.register(MyMetric())
 ```
 
-重启服务后自动生成：
-- 单指标路由：`POST /api/v1/evaluation/llm_judge/my_metric`
-- 可通过批量端点调用：`"metrics": ["my_metric"]`
+After restarting the service, the following are auto-generated:
+- Single-metric route: `POST /api/v1/evaluation/llm_judge/my_metric`
+- Can also be called via the batch endpoint: `"metrics": ["my_metric"]`
 
-## 重试机制
+## Retry Mechanism
 
-`call_llm` 内置指数退避重试：
+`call_llm` has built-in exponential backoff retry:
 
-| 异常 | 重试 |
-|------|------|
-| `RateLimitError (429)` | 是 |
-| `APITimeoutError` | 是 |
-| `APIStatusError (503)` | 是 |
-| `AuthenticationError` | 否 |
-| `BadRequestError (400)` | 否 |
+| Exception | Retry |
+|-----------|-------|
+| `RateLimitError (429)` | Yes |
+| `APITimeoutError` | Yes |
+| `APIStatusError (503)` | Yes |
+| `AuthenticationError` | No |
+| `BadRequestError (400)` | No |
 
-退避公式：`min(base_wait^attempt, max_wait) ± jitter`
+Backoff formula: `min(base_wait^attempt, max_wait) ± jitter`
 
-## 添加新 Evaluator Type
+## Adding a New Evaluator Type
 
-如需添加非 LLM 类指标（如公式计算），创建新的子包：
+To add non-LLM metrics (e.g. formula-based), create a new sub-package:
 
-1. `app/evaluators/performance/` — 已预留目录
-2. 创建 metric 类（同上），在 `registry.py` 创建子 registry
-3. `__init__.py` 中注册 metric
-4. `app/evaluators/__init__.py` 注册新 type：
+1. `app/evaluators/performance/` — directory already reserved
+2. Create metric classes (same as above), create a sub-registry in `registry.py`
+3. Register metrics in `__init__.py`
+4. Register the new type in `app/evaluators/__init__.py`:
 
 ```python
 evaluator_registry.register_type("performance", performance_registry)

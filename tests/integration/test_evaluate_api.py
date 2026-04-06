@@ -44,8 +44,8 @@ async def test_health(async_client):
 async def test_evaluate_faithfulness_success(async_client, eval_id):
     payload = {
         "eval_id": eval_id,
-        "response": "梯度下降是一种优化算法",
-        "retrieved_contexts": "梯度下降（Gradient Descent）是…",
+        "response": "Gradient descent is an optimization algorithm",
+        "retrieved_contexts": "Gradient Descent is a method for minimizing…",
     }
     with patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock):
         with patch(

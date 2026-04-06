@@ -32,10 +32,10 @@ def fbeta_score(tp, fp, fn, beta=1.0):
 
 class FactualCorrectnessRequest(BaseModel):
     """Request model for factual correctness evaluation."""
-    eval_id: UUID = Field(default_factory=uuid4, examples=[str(uuid4())], description="Evaluation ID，不传则自动生成")
-    reference: str = Field(..., examples=["国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同"],
-                           description="标准参考答案")
-    response: str = Field(..., examples=["国产乙肝疫苗与进口疫苗在安全性方面没有区别"], description="模型生成的回答")
+    eval_id: UUID = Field(default_factory=uuid4, examples=[str(uuid4())], description="Evaluation ID, auto-generated if not provided")
+    reference: str = Field(..., examples=["Domestic and imported hepatitis B vaccines are identical in safety and efficacy"],
+                           description="Ground truth reference")
+    response: str = Field(..., examples=["Domestic and imported hepatitis B vaccines have no difference in safety"], description="Model-generated answer")
 
 
 class FactualCorrectness:
@@ -107,8 +107,8 @@ if __name__ == "__main__":
     async def _test():
         fc = FactualCorrectness()
         res = await fc.evaluate(
-            reference="国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同，均可放心使用。",
-            response="国产乙肝疫苗与进口疫苗在安全性方面没有区别。",
+            reference="Domestic and imported hepatitis B vaccines are identical in safety and efficacy, both are safe to use.",
+            response="Domestic and imported hepatitis B vaccines have no difference in safety.",
         )
         print(res)
 

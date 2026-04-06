@@ -1,41 +1,41 @@
-# 本地启动指南
+# Local Setup Guide
 
-## 1. 环境要求
+## 1. Prerequisites
 
 - Python >= 3.11
 - Git
 
-## 2. 克隆项目 & 安装依赖
+## 2. Clone & Install Dependencies
 
 ```bash
 git clone <repo-url>
 cd evaluation-service
 
-# 创建虚拟环境（推荐）
+# Create virtual environment (recommended)
 python -m venv .venv
 # Windows:
 .venv\Scripts\activate
 # macOS/Linux:
 source .venv/bin/activate
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-## 3. 配置环境变量
+## 3. Configure Environment Variables
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，至少填写以下两项（其他都有默认值，按需修改）：
+Edit `.env` — at minimum fill in the following two (all others have defaults):
 
 ```env
-# ===== 必填 =====
-AZURE_OPENAI_API_KEY=你的Azure OpenAI Key
-AZURE_OPENAI_ENDPOINT=https://你的资源名.openai.azure.com/
+# ===== Required =====
+AZURE_OPENAI_API_KEY=your-azure-openai-key
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
 
-# ===== 有默认值，可选覆盖 =====
+# ===== Has defaults, optional overrides =====
 AZURE_OPENAI_API_VERSION=2025-01-01-preview
 LLM_MODEL=gpt-4.1
 LLM_TEMPERATURE=0.0
@@ -45,93 +45,93 @@ SQLITE_DB_PATH=data/evaluation.db
 LOG_LEVEL=INFO
 ```
 
-### 环境变量完整参考
+### Full Environment Variable Reference
 
-#### Azure OpenAI（LLM 调用）
+#### Azure OpenAI (LLM Calls)
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `AZURE_OPENAI_API_KEY` | **是** | | Azure OpenAI API Key |
-| `AZURE_OPENAI_ENDPOINT` | **是** | | Azure OpenAI 终端地址 |
-| `AZURE_OPENAI_API_VERSION` | 否 | `2025-01-01-preview` | API 版本 |
-| `LLM_MODEL` | 否 | `gpt-4.1` | 模型部署名称 |
-| `LLM_TEMPERATURE` | 否 | `0.0` | 生成温度 |
-| `LLM_MAX_ATTEMPTS` | 否 | `3` | 最大重试次数（含首次） |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AZURE_OPENAI_API_KEY` | **Yes** | | Azure OpenAI API Key |
+| `AZURE_OPENAI_ENDPOINT` | **Yes** | | Azure OpenAI Endpoint URL |
+| `AZURE_OPENAI_API_VERSION` | No | `2025-01-01-preview` | API version |
+| `LLM_MODEL` | No | `gpt-4.1` | Model deployment name |
+| `LLM_TEMPERATURE` | No | `0.0` | Generation temperature |
+| `LLM_MAX_ATTEMPTS` | No | `3` | Max retry attempts (including first) |
 
-#### 数据库
+#### Database
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `DB_BACKEND` | 否 | `local` | `local` = SQLite，`azure` = 远程 Azure DB |
-| `SQLITE_DB_PATH` | 否 | `data/evaluation.db` | SQLite 文件路径（仅 local 模式） |
-| `AZURE_DB_URL` | 否 | `mock://placeholder` | Azure DB 连接串（仅 azure 模式需要填真实值） |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DB_BACKEND` | No | `local` | `local` = SQLite, `azure` = remote Azure DB |
+| `SQLITE_DB_PATH` | No | `data/evaluation.db` | SQLite file path (local mode only) |
+| `AZURE_DB_URL` | No | `mock://placeholder` | Azure DB connection string (real value needed for azure mode) |
 
-#### 应用
+#### Application
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `LOG_LEVEL` | 否 | `INFO` | 日志级别（DEBUG / INFO / WARNING / ERROR） |
-| `APP_VERSION` | 否 | `1.0.0` | 版本号（health 接口返回） |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LOG_LEVEL` | No | `INFO` | Log level (DEBUG / INFO / WARNING / ERROR) |
+| `APP_VERSION` | No | `1.0.0` | Version number (returned by health endpoint) |
 
-## 4. 初始化数据库
+## 4. Initialize Database
 
-仅 `DB_BACKEND=local` 时需要，首次建表：
+Only needed when `DB_BACKEND=local`, for initial table creation:
 
 ```bash
 python -m app.db
 ```
 
-看到 `Local SQLite DB initialized at: data/evaluation.db` 即成功。
+Success when you see `Local SQLite DB initialized at: data/evaluation.db`.
 
-> 会自动创建 `data/` 目录和 `evaluation.db` 文件。
+> Automatically creates the `data/` directory and `evaluation.db` file.
 
-## 5. 启动服务
+## 5. Start the Service
 
 ```bash
 python main.py
 ```
 
-服务启动后访问：
-- Swagger 文档：http://localhost:8000/docs
-- Health Check：http://localhost:8000/api/v1/evaluation/health
+After the service starts, visit:
+- Swagger Docs: http://localhost:8000/docs
+- Health Check: http://localhost:8000/api/v1/evaluation/health
 
-## 6. 快速验证
+## 6. Quick Verification
 
 ```bash
-# 检查服务状态
+# Check service status
 curl http://localhost:8000/api/v1/evaluation/health
 
-# 测试单指标评估（需要有效的 Azure OpenAI 配置）
+# Test single-metric evaluation (requires valid Azure OpenAI config)
 curl -X POST http://localhost:8000/api/v1/evaluation/llm_judge/faithfulness \
   -H "Content-Type: application/json" \
   -d '{
-    "response": "梯度下降是一种优化算法",
-    "retrieved_contexts": "梯度下降（Gradient Descent）是一种用于最小化损失函数的优化算法"
+    "response": "Gradient descent is an optimization algorithm",
+    "retrieved_contexts": "Gradient Descent is an optimization algorithm used to minimize loss functions"
   }'
 
-# 测试批量评估
+# Test batch evaluation
 curl -X POST http://localhost:8000/api/v1/evaluation/batch \
   -H "Content-Type: application/json" \
   -d '{
     "metrics": ["faithfulness", "factual_correctness"],
     "test_case": {
-      "response": "国产乙肝疫苗与进口疫苗在安全性方面没有区别",
-      "retrieved_contexts": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同，均可放心使用",
-      "reference": "国产乙肝疫苗与进口乙肝疫苗在安全性和预防效果上完全相同"
+      "response": "Domestic and imported hepatitis B vaccines have no difference in safety",
+      "retrieved_contexts": "Domestic and imported hepatitis B vaccines are identical in safety and efficacy, both can be used with confidence",
+      "reference": "Domestic and imported hepatitis B vaccines are identical in safety and efficacy"
     }
   }'
 ```
 
-## 常见问题
+## Common Issues
 
 ### `FileNotFoundError: Local SQLite database not found`
 
-首次运行需要先建表：`python -m app.db`
+Run table creation first: `python -m app.db`
 
 ### `ValueError: AZURE_OPENAI_API_KEY is required but not set`
 
-检查 `.env` 文件是否存在且 `AZURE_OPENAI_API_KEY` 已填写。确保从项目根目录启动。
+Check that `.env` exists and `AZURE_OPENAI_API_KEY` is set. Make sure to run from the project root directory.
 
-### `.env` 修改后不生效
+### `.env` changes not taking effect
 
-`.env` 在服务启动时一次性加载。修改后重启服务即可。
+`.env` is loaded once at service startup. Restart the service after making changes.

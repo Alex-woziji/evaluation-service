@@ -1,75 +1,75 @@
-# Metrics 架构重构 Task
+# Metrics Architecture Refactoring Task
 
-## 重构目标
+## Refactoring Goal
 
-将 metrics 层从业务逻辑中解耦，实现三层职责分离：
+Decouple the metrics layer from business logic with three-layer separation of concerns:
 
 ```
-API 层（路由/存储） → Registry 层（发现/校验） → Metrics 层（纯评估逻辑）
+API Layer (routing/storage) → Registry Layer (discovery/validation) → Metrics Layer (pure evaluation logic)
 ```
 
-核心原则：
-- Metrics 不依赖任何业务层代码，只依赖 `call_llm`
-- 每个 metric 是独立的朴素类，不继承基类，不自己注册
-- 注册在 registry 中集中完成，通过 duck typing 校验（检查 name、required_fields、evaluate）
-- API 层负责请求解析、响应组装、数据存储
+Core Principles:
+- Metrics have no business-layer dependencies, only use `call_llm`
+- Each metric is a standalone plain class, no base class inheritance, no self-registration
+- Registration is centralized in the registry, validated via duck typing (checks name, required_fields, evaluate)
+- API layer handles request parsing, response assembly, data persistence
 
 ---
 
-## 已完成
+## Completed
 
-### 1. utils 包 (`app/utils/`)
-- [x] `config.py` — `DBSettings` + `LLMSettings` + `AppSettings`（合并旧 app/config.py）
-- [x] `logger.py` — `get_logger()` 通用 logger 工厂
+### 1. Utils Package (`app/utils/`)
+- [x] `config.py` — `DBSettings` + `LLMSettings` + `AppSettings` (consolidated from old app/config.py)
+- [x] `logger.py` — `get_logger()` generic logger factory
 - [x] `llm_utils.py` — `get_llm_client()` + `call_llm(messages, response_format)`
-  - 使用 `AsyncAzureOpenAI`
-  - 内置指数退避重试，不暴露 retry_count
-  - `response_format` 支持 dict 或 pydantic model（自动用 parse()）
-  - 非重试错误（ValueError/AuthenticationError/BadRequestError）直接抛出
-- [x] `llm_tracker.py` — ContextVar 追踪 LLM 调用元数据
+  - Uses `AsyncAzureOpenAI`
+  - Built-in exponential backoff retry, does not expose retry_count
+  - `response_format` supports dict or pydantic model (auto-uses parse())
+  - Non-retryable errors (ValueError/AuthenticationError/BadRequestError) raised immediately
+- [x] `llm_tracker.py` — ContextVar-based LLM call metadata tracking
   - `start_tracking()` / `get_tracked_calls()` / `record_call()`
-  - 自动记录 messages、raw_response、tokens、latency、attempt
-  - metric 层无需改动，`call_llm()` 内部自动追踪
-- [x] `constants.py` — `PROMPT_DIR` + `DEFAULT_DB_PATH`（基于项目根目录的绝对路径）
+  - Auto-records messages, raw_response, tokens, latency, attempt
+  - No changes needed in metric layer, `call_llm()` tracks internally
+- [x] `constants.py` — `PROMPT_DIR` + `DEFAULT_DB_PATH` (absolute path based on project root)
 
-### 2. LLM Judge 包 (`app/evaluators/llm_judge/`)
+### 2. LLM Judge Package (`app/evaluators/llm_judge/`)
 - [x] `Faithfulness.py` — `name="faithfulness"`, `required_fields=["response", "retrieved_contexts"]`, `optional_fields=["user_input"]`, `async evaluate()`
 - [x] `FactualCorrectness.py` — `name="factual_correctness"`, `required_fields=["reference", "response"]`, `async evaluate()`
-- [x] `registry.py` — `llm_judge_registry = MetricRegistry()` 子 registry 单例
-- [x] `__init__.py` — 导入即自动注册两个 metric
-- [x] `README.md` — LLM Judge 系统文档
+- [x] `registry.py` — `llm_judge_registry = MetricRegistry()` sub-registry singleton
+- [x] `__init__.py` — import triggers auto-registration of both metrics
+- [x] `README.md` — LLM Judge system documentation
 
-### 3. Performance 包 (`app/evaluators/performance/`)
-- [x] `registry.py` — `performance_registry = MetricRegistry()` 空壳，待添加公式类 metric
-- [x] `__init__.py` — 预留注册入口
+### 3. Performance Package (`app/evaluators/performance/`)
+- [x] `registry.py` — `performance_registry = MetricRegistry()` empty shell, awaiting formula-based metrics
+- [x] `__init__.py` — placeholder registration entry
 
-### 4. 共享 Registry (`app/evaluators/registry.py`)
-- [x] `MetricRegistry` — 通用子 registry，duck typing 校验 + record 字段校验 + list_metrics
-- [x] `EvaluatorRegistry` — 顶层路由，按 evaluator_type（llm_judge/performance）分发到子 registry
-- [x] `evaluator_registry` 全局单例
-- [x] `app/evaluators/__init__.py` — 注册所有 evaluator type 到顶层 registry
+### 4. Shared Registry (`app/evaluators/registry.py`)
+- [x] `MetricRegistry` — generic sub-registry, duck-typing validation + record field validation + list_metrics
+- [x] `EvaluatorRegistry` — top-level router, dispatches to sub-registries by evaluator_type (llm_judge/performance)
+- [x] `evaluator_registry` global singleton
+- [x] `app/evaluators/__init__.py` — register all evaluator types to top-level registry
 
-### 5. API 层 (`app/api/v1/evaluate.py`)
-- [x] 动态路由注册，每个 metric 一条独立路由
-- [x] 每个 metric 定义自己的 `request_model`（Pydantic）
-- [x] `eval_id` optional（default_factory=uuid4，examples 动态生成）
-- [x] 响应格式：`{eval_id, status, result: {score, reason, ...}, metadata: {...}}`
-- [x] 错误映射：openai 异常 → HTTP status
-- [x] LLM 调用追踪：evaluate 前后 start/get tracking，传给 persist task
+### 5. API Layer (`app/api/v1/evaluate.py`)
+- [x] Dynamic route registration, one route per metric
+- [x] Each metric defines its own `request_model` (Pydantic)
+- [x] `eval_id` optional (default_factory=uuid4, examples dynamically generated)
+- [x] Response format: `{eval_id, status, result: {score, reason, ...}, metadata: {...}}`
+- [x] Error mapping: openai exceptions → HTTP status
+- [x] LLM call tracking: start/get tracking around evaluate, passed to persist task
 
-### 6. DB 重构
-- [x] Config 合并：`app/config.py` 删除，统一到 `app/utils/config.py`（DBSettings/LLMSettings/AppSettings）
-- [x] DB 路径常量化：`DEFAULT_DB_PATH` 在 `constants.py`，不再依赖运行时目录
-- [x] 表重命名：`eval_log` → `evaluation_result`，`llm_call_log` → `llm_metadata`
-- [x] Model 重命名：`EvalLog` → `EvaluationResult`，`LLMCallLog` → `LLMMetadata`
-- [x] 字段清理：删除 `reasoning`、`retry_count`；`scores_detail` → `reason`
-- [x] Latency 统一：`llm_latency_ms` → `llm_latency_s`（Float）
-- [x] `llm_metadata.messages` — JSON 列存原始 `[{role, content}, ...]`
-- [x] `llm_metadata.raw_response` — 存 `{content, model, finish_reason}`（避免 Pydantic 序列化 warning）
-- [x] 持久化事务：`persist_eval_result` 写 evaluation_result + 所有 llm_metadata，一次 commit
-- [x] Migration 0001/0002 已同步
+### 6. DB Refactoring
+- [x] Config consolidation: `app/config.py` deleted, consolidated into `app/utils/config.py` (DBSettings/LLMSettings/AppSettings)
+- [x] DB path as constant: `DEFAULT_DB_PATH` in `constants.py`, no longer depends on runtime directory
+- [x] Table rename: `eval_log` → `evaluation_result`, `llm_call_log` → `llm_metadata`
+- [x] Model rename: `EvalLog` → `EvaluationResult`, `LLMCallLog` → `LLMMetadata`
+- [x] Field cleanup: removed `reasoning`, `retry_count`; `scores_detail` → `reason`
+- [x] Latency unified: `llm_latency_ms` → `llm_latency_s` (Float)
+- [x] `llm_metadata.messages` — JSON column stores raw `[{role, content}, ...]`
+- [x] `llm_metadata.raw_response` — stores `{content, model, finish_reason}` (avoids Pydantic serialization warning)
+- [x] Persistence transaction: `persist_eval_result` writes evaluation_result + all llm_metadata in a single commit
+- [x] Migration 0001/0002 synced
 
-### 7. 当前表结构
+### 7. Current Table Schema
 ```
 evaluation_result:
   id(PK), metric_type, metric_name, status,
@@ -83,43 +83,43 @@ llm_metadata:
 ```
 
 ### 8. Git commits on branch `refactor/metrics-decoupling`
-- `0da923f` — utils 包 + metrics 层重写
-- `b35a061` — MetricRegistry + duck typing 校验
-- `3ae6833` — 重组为 type-based 包
-- `120aaa7` — API 层重构（per-metric 路由）
-- `13f2701` — 旧文件清理
-- `68cb0b3` — 响应格式重构 + eval_id optional + README
-- `1a48f34` — latency 从 ms 改为秒
-- `c892aa4` — Config 统一 + DB 表名/字段重构
-- `7fb4eab` — LLM tracking (ContextVar) + persist llm_metadata + DB 路径常量化
+- `0da923f` — utils package + metrics layer rewrite
+- `b35a061` — MetricRegistry + duck typing validation
+- `3ae6833` — restructured into type-based packages
+- `120aaa7` — API layer refactoring (per-metric routes)
+- `13f2701` — old file cleanup
+- `68cb0b3` — response format refactoring + eval_id optional + README
+- `1a48f34` — latency changed from ms to seconds
+- `c892aa4` — config consolidation + DB table/field refactoring
+- `7fb4eab` — LLM tracking (ContextVar) + persist llm_metadata + DB path as constant
 
 ---
 
-## 待完成
+## Remaining
 
-### 9. Batch API（调度层统一入口）
-- [x] 新增 `POST /api/v1/evaluation/batch`
-- [x] 请求模型：
+### 9. Batch API (Scheduler Layer Unified Entry Point)
+- [x] Added `POST /api/v1/evaluation/batch`
+- [x] Request model:
   ```json
   {
-    "task_id": "uuid（可选）",
+    "task_id": "uuid (optional)",
     "metrics": ["faithfulness", "factual_correctness"],
     "test_case": { "response": "...", "retrieved_contexts": "...", "reference": "...", ... }
   }
   ```
-- [x] 内部逻辑：遍历 metrics → 从 test_case 提取字段 → 用 required_fields 校验 → 调用 evaluate
-- [x] 并发执行：`asyncio.gather` 并发跑多个 metric（非串行）
-- [x] DB 变动：`evaluation_result` 新增 `task_id` 列（可选，同 task 下多 metric 共享）
-- [x] 保留现有 per-metric 路由（单用户 / Swagger）
-- [x] 两套路由共享 `_evaluate_single()` 核心逻辑
-- [x] `EvaluatorRegistry.find_metric(name)` — 按名称跨类型查找 metric
-- [x] Migration 0003 — 新增 task_id 列 + index
+- [x] Internal logic: iterate metrics → extract fields from test_case → validate with required_fields → call evaluate
+- [x] Concurrent execution: `asyncio.gather` runs multiple metrics concurrently (not serially)
+- [x] DB change: `evaluation_result` added `task_id` column (optional, shared across metrics under same task)
+- [x] Keep existing per-metric routes (single user / Swagger)
+- [x] Both route types share `_evaluate_single()` core logic
+- [x] `EvaluatorRegistry.find_metric(name)` — find metric by name across types
+- [x] Migration 0003 — added task_id column + index
 
-### 10. 旧文件清理
-- [ ] `app/evaluators/base.py` — 待删
-- [ ] `tests/unit/` — 旧测试需重写
+### 10. Old File Cleanup
+- [ ] `app/evaluators/base.py` — to be deleted
+- [ ] `tests/unit/` — old tests need rewriting
 
-### 11. 测试
-- [ ] 每个 metric 独立单元测试
-- [ ] registry 注册和校验测试
-- [ ] batch endpoint 集成测试
+### 11. Tests
+- [ ] Independent unit tests per metric
+- [ ] Registry registration and validation tests
+- [ ] Batch endpoint integration tests
