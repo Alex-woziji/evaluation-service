@@ -152,7 +152,8 @@ def _build_handler(eval_type: str, metric_name: str, req_model):
     async def handler(request: req_model, background_tasks: BackgroundTasks) -> EvaluateResponse:  # type: ignore[valid-type]
         data = request.model_dump(exclude_none=True)
         eval_id = data.pop("eval_id")
-        item = await _evaluate_single(eval_type, metric_name, eval_id, data, background_tasks)
+        data.pop("llm_config", None)
+        item = await _evaluate_single(eval_type, metric_name, eval_id, data, background_tasks, llm_config=request.llm_config)
 
         if item.status == "failed":
             _make_error(

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class LLMConfig(BaseModel):
     """Per-request LLM configuration override. Priority: API param > env var > default."""
 
-    model: Optional[str] = Field(None, description="Model deployment name, overrides LLM_MODEL env var")
+    model: Optional[str] = Field("gpt-4.1", description="Model deployment name, overrides LLM_MODEL env var")
     temperature: Optional[float] = Field(None, description="Generation temperature, overrides LLM_TEMPERATURE env var")
 
 

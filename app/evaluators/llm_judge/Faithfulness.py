@@ -2,15 +2,12 @@ import asyncio
 
 import yaml
 from pydantic import BaseModel, Field
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 from uuid import UUID, uuid4
 
 from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
-
-if TYPE_CHECKING:
-    from app.models.request import LLMConfig
 
 from app.models.request import LLMConfig
 

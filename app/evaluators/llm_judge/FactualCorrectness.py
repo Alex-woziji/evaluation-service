@@ -1,5 +1,4 @@
 import asyncio
-from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
@@ -12,8 +11,7 @@ from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
 
-if TYPE_CHECKING:
-    from app.models.request import LLMConfig
+from app.models.request import LLMConfig
 
 with open(PROMPT_DIR, "r", encoding="utf-8") as f:
     _prompt_config = yaml.safe_load(f)
