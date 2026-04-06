@@ -1,0 +1,126 @@
+FactualCorrectness:
+  Instruction: |
+    Decompose and break down each of the input sentences into one or more standalone statements. Each statement should be a standalone claim that can be independently verified.
+    Follow the level of atomicity and coverage as shown in the examples.
+  Examples:
+    Example_1:
+      Input: |
+        Charles Babbage was a French mathematician, philosopher, and food critic."
+      Output:
+        LOW_ATOMICITY_LOW_COVERAGE: |
+          ["Charles Babbage was a mathematician and philosopher."]
+        LOW_ATOMICITY_HIGH_COVERAGE: |
+          ["Charles Babbage was a French mathematician, philosopher, and food critic."]
+        HIGH_ATOMICITY_LOW_COVERAGE: |
+          [
+              "Charles Babbage was a mathematician.",
+              "Charles Babbage was a philosopher.",
+          ]
+        HIGH_ATOMICITY_HIGH_COVERAGE: |
+          [
+            "Charles Babbage was a mathematician.",
+            "Charles Babbage was a philosopher.",
+            "Charles Babbage was a food critic.",
+            "Charles Babbage was French.",
+          ]
+    Example_2:
+      Input: |
+        Albert Einstein was a German theoretical physicist. He developed the theory of relativity and also contributed to the development of quantum mechanics.
+
+      Output:
+        LOW_ATOMICITY_LOW_COVERAGE: |
+          [
+                "Albert Einstein was a German physicist.",
+                "Albert Einstein developed relativity and contributed to quantum mechanics.",
+          ]
+        LOW_ATOMICITY_HIGH_COVERAGE: |
+          [
+                "Albert Einstein was a German theoretical physicist.",
+                "Albert Einstein developed the theory of relativity and also contributed to the development of quantum mechanics.",
+          ]
+        HIGH_ATOMICITY_LOW_COVERAGE: |
+          [
+                "Albert Einstein was a German theoretical physicist.",
+                "Albert Einstein developed the theory of relativity.",
+          ]
+        HIGH_ATOMICITY_HIGH_COVERAGE: |
+          [
+                "Albert Einstein was a German theoretical physicist.",
+                "Albert Einstein developed the theory of relativity.",
+                "Albert Einstein contributed to the development of quantum mechanics.",
+          ]
+          
+
+FAITHFULNESS:
+  Statements:
+    Instruction:
+      Given a question and an answer, analyze the complexity of each sentence in the answer. Break down each sentence into one or more fully understandable statements. Ensure that no pronouns are used in any statement. Format the outputs in JSON.
+    Examples:
+      Example_1:
+        Input: |
+          {
+            "question":"Who was Albert Einstein and what is he best known for?",
+            "answer"""He was a German-born theoretical physicist, widely acknowledged to be one of the greatest and most influential physicists of all time. He was best known for developing the theory of relativity, he also made important contributions to the development of the theory of quantum mechanics.",
+          }
+        Output: |
+          {
+            "statements":
+              [
+                "Albert Einstein was a German-born theoretical physicist.",
+                "Albert Einstein is recognized as one of the greatest and most influential physicists of all time.",
+                "Albert Einstein was best known for developing the theory of relativity.",
+                "Albert Einstein also made important contributions to the development of the theory of quantum mechanics.",
+              ]
+          }
+  Verdicts:
+    Instruction :
+     Your task is to judge the faithfulness of a series of statements based on a given context. For each statement you must return verdict as 1 if the statement can be directly inferred based on the context or 0 if the statement can not be directly inferred based on the context.
+    Examples:
+      Example_1:
+        Input: |
+          {
+              "context":"""John is a student at XYZ University. He is pursuing a degree in Computer Science. He is enrolled in several courses this semester, including Data Structures, Algorithms, and Database Management. John is a diligent student and spends a significant amount of time studying and completing assignments. He often stays late in the library to work on his projects.""",
+              "statements":[
+                  "John is majoring in Biology.",
+                  "John is taking a course on Artificial Intelligence.",
+                  "John is a dedicated student.",
+                  "John has a part-time job.",
+              ],
+          }
+        Output: |
+          [
+              {
+                  "statement":"John is majoring in Biology.",
+                  "reason":"John's major is explicitly mentioned as Computer Science. There is no information suggesting he is majoring in Biology.",
+                  "verdict":0,
+              },
+              {
+                  "statement":"John is taking a course on Artificial Intelligence.",
+                  "reason":"The context mentions the courses John is currently enrolled in, and Artificial Intelligence is not mentioned. Therefore, it cannot be deduced that John is taking a course on AI.",
+                  "verdict":0,
+              },
+              {
+                      "statement":"John is a dedicated student.",
+                      "reason":"The context states that he spends a significant amount of time studying and completing assignments. Additionally, it mentions that he often stays late in the library to work on his projects, which implies dedication.",
+                      "verdict":1,
+              },
+              {
+                      "statement":"John has a part-time job.",
+                      "reason":"There is no information given in the context about John having a part-time job.",
+                      "verdict":0,
+              },
+          ]
+      Example_2:
+        Input: |
+          {
+              "context":"Photosynthesis is a process used by plants, algae, and certain bacteria to convert light energy into chemical energy.",
+              "statements":["Albert Einstein was a genius."]
+          }
+        Output: |
+          [
+            {
+            "statement":"Albert Einstein was a genius.",
+            "reason":"The context and statement are unrelated",
+            "verdict":0,
+            }
+          ]

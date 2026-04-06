@@ -4,14 +4,15 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.config import settings
+from app.utils.config import db_settings
+from app.utils.constants import DEFAULT_DB_PATH
 
 
 def _build_database_url() -> str:
-    backend = settings.DB_BACKEND.strip().lower()
+    backend = db_settings.DB_BACKEND.strip().lower()
 
     if backend == "local":
-        db_path = Path(settings.SQLITE_DB_PATH)
+        db_path = Path(db_settings.SQLITE_DB_PATH) if db_settings.SQLITE_DB_PATH else DEFAULT_DB_PATH
         if not db_path.exists():
             raise FileNotFoundError(
                 f"Local SQLite database not found at '{db_path}'. "
@@ -20,7 +21,7 @@ def _build_database_url() -> str:
         return f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
     if backend == "azure":
-        azure_db_url = settings.AZURE_DB_URL.strip()
+        azure_db_url = db_settings.AZURE_DB_URL.strip()
         if not azure_db_url or azure_db_url.startswith("mock://"):
             raise ValueError(
                 "DB_BACKEND is 'azure' but AZURE_DB_URL is missing or mock placeholder. "

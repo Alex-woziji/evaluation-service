@@ -25,6 +25,7 @@ ENV/
 
 *.log
 **/**.db
+.pytest_cache/
 .claude
 **/ai-campaign-itcr-ui/
 agents.tar.gz

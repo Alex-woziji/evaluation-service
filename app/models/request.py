@@ -1,39 +1,33 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator
-
-
-class RecordIn(BaseModel):
-    input: str = Field(..., min_length=1)
-    output: str = Field(..., min_length=1)
-    reference: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+from pydantic import BaseModel, Field
 
 
-class EvalConfigIn(BaseModel):
-    judge_model: Optional[str] = None
-    criteria: List[str] = Field(default_factory=list)
-    rubric: Optional[str] = None
-    score_range: Dict[str, float] = Field(default_factory=lambda: {"min": 0.0, "max": 1.0})
-    language: str = "zh"
-
-    model_config = {"extra": "allow"}
-
-    @field_validator("score_range")
-    @classmethod
-    def validate_score_range(cls, v: Dict[str, float]) -> Dict[str, float]:
-        if "min" not in v or "max" not in v:
-            raise ValueError("score_range must have 'min' and 'max' keys")
-        if v["min"] >= v["max"]:
-            raise ValueError("score_range min must be less than max")
-        return v
+# ── LLM Config Override ───────────────────────────────────────────────────────
 
 
-class EvaluateRequest(BaseModel):
-    eval_id: UUID
-    metric_type: str = Field(..., min_length=1)
-    record: RecordIn
-    eval_config: EvalConfigIn
+class LLMConfig(BaseModel):
+    """Per-request LLM configuration override. Priority: API param > env var > default."""
+
+    model: Optional[str] = Field("gpt-4.1", description="Model deployment name, overrides LLM_MODEL env var")
+    temperature: Optional[float] = Field(None, description="Generation temperature, overrides LLM_TEMPERATURE env var")
+
+
+# ── Batch Request ──────────────────────────────────────────────────────────────
+
+
+class BatchEvaluateRequest(BaseModel):
+    """Request model for batch evaluation."""
+
+    task_id: UUID = Field(default_factory=uuid4, description="Task ID shared across all metrics in the batch, auto-generated if not provided")
+    metrics: List[str] = Field(..., min_length=1, description="List of metric names to evaluate concurrently")
+    test_case: Dict[str, Any] = Field(..., description="Loose dict containing fields for all metrics")
+    llm_config: Optional[LLMConfig] = Field(None, description="Per-request LLM config override (model, temperature)")
+
+
+class ValidationErrorDetail(BaseModel):
+    field: str
+    message: str

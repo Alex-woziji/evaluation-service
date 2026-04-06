@@ -6,33 +6,30 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import LLMCallLog
+from app.db.models import LLMMetadata
 
 logger = logging.getLogger(__name__)
 
 
-async def insert_llm_call_log(
+async def insert_llm_metadata(
     session: AsyncSession,
-    eval_log_id: UUID,
+    evaluation_result_id: UUID,
     judge_model: str,
     attempt_number: int,
-    prompt_system: Optional[str] = None,
-    prompt_user: Optional[str] = None,
+    messages: Optional[list[dict[str, str]]] = None,
     raw_response: Optional[Dict[str, Any]] = None,
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
-    llm_latency_ms: Optional[int] = None,
+    llm_latency_s: Optional[float] = None,
 ) -> None:
-    log = LLMCallLog(
-        eval_log_id=str(eval_log_id),
+    log = LLMMetadata(
+        evaluation_result_id=str(evaluation_result_id),
         judge_model=judge_model,
-        prompt_system=prompt_system,
-        prompt_user=prompt_user,
+        messages=messages,
         raw_response=raw_response,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        llm_latency_ms=llm_latency_ms,
+        llm_latency_s=llm_latency_s,
         attempt_number=attempt_number,
     )
     session.add(log)
-    await session.commit()

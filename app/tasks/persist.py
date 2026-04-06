@@ -1,71 +1,75 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Optional
 from uuid import UUID
 
 from app.db.connection import AsyncSessionLocal
-from app.db.eval_log_repo import upsert_eval_log
-from app.db.llm_call_log_repo import insert_llm_call_log
+from app.db.evaluation_result_repo import upsert_evaluation_result
+from app.db.models import LLMMetadata
+from app.utils.llm_tracker import LLMCallRecord
 
 logger = logging.getLogger(__name__)
 
 
 async def persist_eval_result(
     eval_id: UUID,
-    metric_type: str,
+    evaluator_type: str,
+    metric_name: str,
     status: str,
     evaluated_at: datetime,
+    task_id: Optional[str] = None,
     score: Optional[float] = None,
-    scores_detail: Optional[Dict[str, float]] = None,
-    reasoning: Optional[str] = None,
+    reason: Optional[Any] = None,
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
-    retry_count: int = 0,
-    eval_latency_ms: Optional[int] = None,
-    llm_call_data: Optional[List[Dict[str, Any]]] = None,
+    eval_latency_s: Optional[float] = None,
+    llm_calls: Optional[list[LLMCallRecord]] = None,
 ) -> None:
-    """
-    Background task: write eval_log and (for llm_judge) llm_call_log.
+    """Background task: write evaluation_result and llm_metadata.
+
     Any exception is caught, logged, and swallowed — must never affect the HTTP response.
     """
     try:
         async with AsyncSessionLocal() as session:
-            await upsert_eval_log(
+            await upsert_evaluation_result(
                 session=session,
                 eval_id=eval_id,
-                metric_type=metric_type,
+                metric_type=evaluator_type,
+                metric_name=metric_name,
                 status=status,
                 evaluated_at=evaluated_at,
+                task_id=task_id,
                 score=score,
-                scores_detail=scores_detail,
-                reasoning=reasoning,
+                reason=reason,
                 error_type=error_type,
                 error_message=error_message,
-                retry_count=retry_count,
-                eval_latency_ms=eval_latency_ms,
+                eval_latency_s=eval_latency_s,
             )
 
-        if llm_call_data:
-            async with AsyncSessionLocal() as session:
-                for call in llm_call_data:
-                    await insert_llm_call_log(
-                        session=session,
-                        eval_log_id=eval_id,
-                        judge_model=call.get("judge_model", ""),
-                        attempt_number=call.get("attempt_number", 1),
-                        prompt_system=call.get("prompt_system"),
-                        prompt_user=call.get("prompt_user"),
-                        raw_response=call.get("raw_response"),
-                        input_tokens=call.get("input_tokens"),
-                        output_tokens=call.get("output_tokens"),
-                        llm_latency_ms=call.get("llm_latency_ms"),
+            if llm_calls:
+                eval_id_str = str(eval_id)
+                for call in llm_calls:
+                    session.add(
+                        LLMMetadata(
+                            evaluation_result_id=eval_id_str,
+                            judge_model=call.model,
+                            messages=call.messages,
+                            raw_response=call.raw_response,
+                            input_tokens=call.input_tokens,
+                            output_tokens=call.output_tokens,
+                            llm_latency_s=call.latency_s,
+                            attempt_number=call.attempt_number,
+                        )
                     )
+
+            await session.commit()
 
     except Exception:
         logger.exception(
-            "Background persist failed for eval_id=%s metric_type=%s",
+            "Background persist failed for eval_id=%s metric=%s/%s",
             eval_id,
-            metric_type,
+            evaluator_type,
+            metric_name,
         )

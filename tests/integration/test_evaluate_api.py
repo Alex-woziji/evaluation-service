@@ -1,18 +1,16 @@
-"""
-Integration tests for POST /api/v1/evaluation/evaluate and GET /health.
+"""Integration tests for per-metric evaluation endpoints and GET /health.
+
 LLM API calls are fully mocked — no network or database required.
 """
 from __future__ import annotations
 
-import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
-from app.tasks.persist import persist_eval_result
+from main import app
 
 # Suppress background DB writes in all tests
 pytestmark = pytest.mark.asyncio
@@ -21,40 +19,6 @@ pytestmark = pytest.mark.asyncio
 @pytest.fixture
 def eval_id() -> str:
     return str(uuid.uuid4())
-
-
-@pytest.fixture
-def base_payload(eval_id: str) -> dict:
-    return {
-        "eval_id": eval_id,
-        "metric_type": "llm_judge",
-        "record": {
-            "input": "请解释梯度下降",
-            "output": "梯度下降是一种优化算法",
-            "reference": "梯度下降（Gradient Descent）是…",
-        },
-        "eval_config": {
-            "judge_model": "gpt-4o",
-            "criteria": ["accuracy", "completeness", "clarity"],
-            "rubric": "评估回答质量",
-        },
-    }
-
-
-def _mock_llm(criteria_scores: dict, reasoning: str = "good answer"):
-    content = json.dumps({"criteria_scores": criteria_scores, "reasoning": reasoning})
-    message = MagicMock()
-    message.content = content
-    choice = MagicMock()
-    choice.message = message
-    usage = MagicMock()
-    usage.prompt_tokens = 100
-    usage.completion_tokens = 40
-    response = MagicMock()
-    response.choices = [choice]
-    response.usage = usage
-    response.model_dump.return_value = {"mocked": True}
-    return response
 
 
 @pytest.fixture
@@ -70,133 +34,166 @@ async def test_health(async_client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert "llm_judge" in body["registered_evaluators"]
+    assert "llm_judge" in body["evaluators"]
+    assert "faithfulness" in body["evaluators"]["llm_judge"]
+    assert "factual_correctness" in body["evaluators"]["llm_judge"]
 
 
-# ── Success path ───────────────────────────────────────────────────────────────
+# ── Faithfulness ───────────────────────────────────────────────────────────────
 
-async def test_evaluate_success(async_client, base_payload, eval_id):
-    mock_resp = _mock_llm({"accuracy": 0.9, "completeness": 0.85, "clarity": 0.8})
-    with (
-        patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls,
-        patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock),
-    ):
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_resp)
-        mock_cls.return_value = mock_client
+async def test_evaluate_faithfulness_success(async_client, eval_id):
+    payload = {
+        "eval_id": eval_id,
+        "response": "Gradient descent is an optimization algorithm",
+        "retrieved_contexts": "Gradient Descent is a method for minimizing…",
+    }
+    with patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock):
+        with patch(
+            "app.evaluators.llm_judge.Faithfulness.call_llm",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            stmt_resp = MagicMock()
+            stmt_resp.choices = [
+                MagicMock(message=MagicMock(parsed=MagicMock(statements=["stmt1", "stmt2"])))
+            ]
+            verdict_resp = MagicMock()
+            verdict_resp.choices = [
+                MagicMock(
+                    message=MagicMock(
+                        parsed=MagicMock(
+                            statements=[
+                                MagicMock(statement="stmt1", reason="ok", verdict=1),
+                                MagicMock(statement="stmt2", reason="no", verdict=0),
+                            ]
+                        )
+                    )
+                )
+            ]
+            mock_llm.side_effect = [stmt_resp, verdict_resp]
 
-        async with async_client as client:
-            resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+            async with async_client as client:
+                resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["eval_id"] == eval_id
-    assert body["metric_type"] == "llm_judge"
     assert body["status"] == "success"
-    assert 0.0 <= body["score"] <= 1.0
-    assert set(body["scores_detail"].keys()) == {"accuracy", "completeness", "clarity"}
-    assert body["retry_count"] == 0
-    assert body["eval_latency_ms"] >= 0
+    # result section
+    assert body["result"]["score"] == 0.5
+    assert "reason" in body["result"]
+    # metadata section
+    assert body["metadata"]["evaluator_type"] == "llm_judge"
+    assert body["metadata"]["metric_name"] == "faithfulness"
+    assert body["metadata"]["eval_latency_s"] >= 0
+    assert "evaluated_at" in body["metadata"]
 
 
-# ── Validation errors ──────────────────────────────────────────────────────────
+# ── Validation errors (Pydantic catches these before handler) ──────────────────
 
-async def test_missing_eval_id_returns_422(async_client, base_payload):
-    del base_payload["eval_id"]
+async def test_faithfulness_missing_response_returns_422(async_client, eval_id):
+    payload = {
+        "eval_id": eval_id,
+        "retrieved_contexts": "some context",
+    }
     async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+        resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
     assert resp.status_code == 422
+    assert any("response" in str(e) for e in resp.json()["detail"])
 
 
-async def test_missing_record_input_returns_422(async_client, base_payload):
-    base_payload["record"]["input"] = ""
+async def test_factual_correctness_without_reference_returns_422(async_client, eval_id):
+    payload = {
+        "eval_id": eval_id,
+        "response": "some text",
+    }
     async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+        resp = await client.post("/api/v1/evaluation/llm_judge/factual_correctness", json=payload)
     assert resp.status_code == 422
+    assert any("reference" in str(e) for e in resp.json()["detail"])
 
 
-async def test_unknown_metric_type_returns_422(async_client, base_payload):
-    base_payload["metric_type"] = "does_not_exist"
-    async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
-    assert resp.status_code == 422
+async def test_auto_generated_eval_id(async_client):
+    """eval_id is optional — service generates one if not provided."""
+    payload = {
+        "response": "some text",
+        "retrieved_contexts": "some context",
+    }
+    with patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock):
+        with patch(
+            "app.evaluators.llm_judge.Faithfulness.call_llm",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            stmt_resp = MagicMock()
+            stmt_resp.choices = [
+                MagicMock(message=MagicMock(parsed=MagicMock(statements=["stmt1"])))
+            ]
+            verdict_resp = MagicMock()
+            verdict_resp.choices = [
+                MagicMock(
+                    message=MagicMock(
+                        parsed=MagicMock(
+                            statements=[MagicMock(statement="stmt1", reason="ok", verdict=1)]
+                        )
+                    )
+                )
+            ]
+            mock_llm.side_effect = [stmt_resp, verdict_resp]
+
+            async with async_client as client:
+                resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
+
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["detail"]["error"] == "UNKNOWN_METRIC_TYPE"
-
-
-async def test_missing_judge_model_returns_422(async_client, base_payload):
-    del base_payload["eval_config"]["judge_model"]
-    async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
-    assert resp.status_code == 422
-    body = resp.json()
-    assert body["detail"]["error"] == "CONFIG_VALIDATION_ERROR"
-
-
-async def test_empty_criteria_returns_422(async_client, base_payload):
-    base_payload["eval_config"]["criteria"] = []
-    async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
-    assert resp.status_code == 422
-    body = resp.json()
-    assert body["detail"]["error"] == "CONFIG_VALIDATION_ERROR"
-
-
-async def test_invalid_score_range_returns_422(async_client, base_payload):
-    base_payload["eval_config"]["score_range"] = {"min": 1.0, "max": 0.0}
-    async with async_client as client:
-        resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
-    assert resp.status_code == 422
+    assert body["eval_id"] is not None
+    assert body["status"] == "success"
 
 
 # ── LLM error paths ────────────────────────────────────────────────────────────
 
-async def test_parse_error_returns_500(async_client, base_payload):
-    bad_message = MagicMock()
-    bad_message.content = "this is not json"
-    bad_choice = MagicMock()
-    bad_choice.message = bad_message
-    bad_usage = MagicMock()
-    bad_usage.prompt_tokens = 10
-    bad_usage.completion_tokens = 5
-    bad_response = MagicMock()
-    bad_response.choices = [bad_choice]
-    bad_response.usage = bad_usage
-    bad_response.model_dump.return_value = {}
-
-    with (
-        patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls,
-        patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock),
-    ):
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=bad_response)
-        mock_cls.return_value = mock_client
-
-        async with async_client as client:
-            resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
-
-    assert resp.status_code == 500
-    assert resp.json()["detail"]["error"] == "PARSE_ERROR"
-
-
-async def test_rate_limit_exhausted_returns_500(async_client, base_payload):
+async def test_rate_limit_returns_503(async_client, eval_id):
     import openai
 
+    payload = {
+        "eval_id": eval_id,
+        "response": "some text",
+        "retrieved_contexts": "some context",
+    }
     with (
-        patch("app.evaluators.llm_judge_evaluator.AsyncOpenAI") as mock_cls,
         patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock),
+        patch(
+            "app.evaluators.llm_judge.Faithfulness.call_llm",
+            new_callable=AsyncMock,
+            side_effect=openai.RateLimitError("rate limit", response=MagicMock(), body={}),
+        ),
         patch("asyncio.sleep", new_callable=AsyncMock),
     ):
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=openai.RateLimitError("rate limit", response=MagicMock(), body={})
-        )
-        mock_cls.return_value = mock_client
-
         async with async_client as client:
-            resp = await client.post("/api/v1/evaluation/evaluate", json=base_payload)
+            resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
 
-    assert resp.status_code == 500
+    assert resp.status_code == 503
     body = resp.json()
-    assert body["detail"]["error"] == "LLM_API_ERROR"
-    assert body["detail"]["retry_count"] == 2
+    assert body["detail"]["error"] == "LLM_RATE_LIMIT"
+
+
+async def test_timeout_returns_504(async_client, eval_id):
+    import openai
+
+    payload = {
+        "eval_id": eval_id,
+        "response": "some text",
+        "retrieved_contexts": "some context",
+    }
+    with (
+        patch("app.api.v1.evaluate.persist_eval_result", new_callable=AsyncMock),
+        patch(
+            "app.evaluators.llm_judge.Faithfulness.call_llm",
+            new_callable=AsyncMock,
+            side_effect=openai.APITimeoutError("timeout"),
+        ),
+    ):
+        async with async_client as client:
+            resp = await client.post("/api/v1/evaluation/llm_judge/faithfulness", json=payload)
+
+    assert resp.status_code == 504
+    body = resp.json()
+    assert body["detail"]["error"] == "LLM_TIMEOUT"
