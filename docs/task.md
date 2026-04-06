@@ -67,59 +67,57 @@ Core Principles:
 - [x] `llm_metadata.messages` — JSON column stores raw `[{role, content}, ...]`
 - [x] `llm_metadata.raw_response` — stores `{content, model, finish_reason}` (avoids Pydantic serialization warning)
 - [x] Persistence transaction: `persist_eval_result` writes evaluation_result + all llm_metadata in a single commit
-- [x] Migration 0001/0002 synced
 
-### 7. Current Table Schema
+### 7. Batch API
+- [x] `POST /api/v1/evaluation/batch` — accepts list of metric names + loose test_case dict
+- [x] `asyncio.gather` runs all metrics concurrently (not serially)
+- [x] `task_id` auto-generated if not provided (UUID), shared across metrics in a batch
+- [x] Refactored `_evaluate` into `_evaluate_single` returning `BatchItemResult` (no HTTPException)
+- [x] Single-metric routes adapt `_evaluate_single`, keeping existing behavior
+- [x] `EvaluatorRegistry.find_metric(name)` — find metric by name across all evaluator types
+- [x] Upfront validation: resolve all metrics + check required fields before execution, 422 on failure
+- [x] Error isolation: individual metric LLM errors do not affect other metrics
+
+### 8. DB Schema Cleanup
+- [x] PK rename: `evaluation_result.id` → `eval_id`, `llm_metadata.id` → `metadata_id`
+- [x] Added `task_id` column to `evaluation_result` (nullable, indexed)
+- [x] FK updated: `llm_metadata.evaluation_result_id` references `evaluation_result.eval_id`
+
+### 9. Project Cleanup
+- [x] Removed `migrations/` directory — will regenerate after schema stabilizes
+- [x] Removed `alembic.ini`, `pyproject.toml`, `app/models/request.py`
+- [x] Removed outdated docs: `docs/API_Documentation.md`, `docs/metrics-architecture-design.md`, `docs/evaluation_layer_spec.docx`
+- [x] Removed empty `tests/unit/` directory
+- [x] Added `.pytest_cache/` to `.gitignore`
+- [x] Translated all Chinese to English across codebase (docs, API examples, comments, Field descriptions)
+
+### 10. Documentation
+- [x] `README.md` — full architecture, API reference, DB schema, data flow diagram
+- [x] `docs/GETTING_STARTED.md` — local setup guide for onboarding
+- [x] `app/evaluators/llm_judge/README.md` — registry mechanics, LLM config, how to add new metric
+- [x] `app/db/README.md` — DB backend setup
+
+---
+
+## Current Table Schema
+
 ```
 evaluation_result:
-  id(PK), metric_type, metric_name, status,
+  eval_id(PK), task_id, metric_type, metric_name, status,
   score, reason(JSON), error_type, error_message,
   eval_latency_s, evaluated_at
 
 llm_metadata:
-  id(PK), evaluation_result_id(FK), judge_model,
+  metadata_id(PK), evaluation_result_id(FK), judge_model,
   messages(JSON), raw_response(JSON),
   input_tokens, output_tokens, llm_latency_s, attempt_number
 ```
-
-### 8. Git commits on branch `refactor/metrics-decoupling`
-- `0da923f` — utils package + metrics layer rewrite
-- `b35a061` — MetricRegistry + duck typing validation
-- `3ae6833` — restructured into type-based packages
-- `120aaa7` — API layer refactoring (per-metric routes)
-- `13f2701` — old file cleanup
-- `68cb0b3` — response format refactoring + eval_id optional + README
-- `1a48f34` — latency changed from ms to seconds
-- `c892aa4` — config consolidation + DB table/field refactoring
-- `7fb4eab` — LLM tracking (ContextVar) + persist llm_metadata + DB path as constant
 
 ---
 
 ## Remaining
 
-### 9. Batch API (Scheduler Layer Unified Entry Point)
-- [x] Added `POST /api/v1/evaluation/batch`
-- [x] Request model:
-  ```json
-  {
-    "task_id": "uuid (optional)",
-    "metrics": ["faithfulness", "factual_correctness"],
-    "test_case": { "response": "...", "retrieved_contexts": "...", "reference": "...", ... }
-  }
-  ```
-- [x] Internal logic: iterate metrics → extract fields from test_case → validate with required_fields → call evaluate
-- [x] Concurrent execution: `asyncio.gather` runs multiple metrics concurrently (not serially)
-- [x] DB change: `evaluation_result` added `task_id` column (optional, shared across metrics under same task)
-- [x] Keep existing per-metric routes (single user / Swagger)
-- [x] Both route types share `_evaluate_single()` core logic
-- [x] `EvaluatorRegistry.find_metric(name)` — find metric by name across types
-- [x] Migration 0003 — added task_id column + index
-
-### 10. Old File Cleanup
-- [ ] `app/evaluators/base.py` — to be deleted
-- [ ] `tests/unit/` — old tests need rewriting
-
-### 11. Tests
+### Tests
 - [ ] Independent unit tests per metric
 - [ ] Registry registration and validation tests
 - [ ] Batch endpoint integration tests
