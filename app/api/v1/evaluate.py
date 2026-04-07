@@ -18,6 +18,7 @@ from app.models.response import (
     MetricResult,
 )
 from app.tasks.persist import persist_eval_result
+from app.utils.config import app_settings
 from app.utils.llm_tracker import get_tracked_calls, set_config_override, start_tracking
 from app.utils.logger import get_logger
 
@@ -157,7 +158,7 @@ def _build_handler(eval_type: str, metric_name: str, req_model):
 
         if item.status == "failed":
             _make_error(
-                {"LLM_AUTH_ERROR": 500, "LLM_RATE_LIMIT": 503, "LLM_TIMEOUT": 504}.get(item.error, 500),
+                {"LLM_AUTH_ERROR": 500, "LLM_RATE_LIMIT": 503, "LLM_TIMEOUT": 504, "LLM_BAD_REQUEST": 400}.get(item.error, 500),
                 item.error, item.message, eval_id=eval_id,
             )
 
@@ -251,6 +252,7 @@ async def batch_evaluate(
             record=record,
             background_tasks=background_tasks,
             task_id=task_id,
+            llm_config=request.llm_config,
         )
 
     results = await asyncio.gather(
@@ -270,5 +272,5 @@ async def health() -> dict:
     return {
         "status": "ok",
         "evaluators": metrics_info,
-        "version": "2.0.0",
+        "version": app_settings.app_version,
     }
