@@ -11,7 +11,7 @@ from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
 
-from app.models.request import LLMConfig
+from app.models.request import BaseMetricRequest, LLMConfig
 
 with open(PROMPT_DIR, "r", encoding="utf-8") as f:
     _prompt_config = yaml.safe_load(f)
@@ -32,13 +32,11 @@ def fbeta_score(tp, fp, fn, beta=1.0):
     return (1 + beta_sq) * (precision * recall) / (beta_sq * precision + recall)
 
 
-class FactualCorrectnessRequest(BaseModel):
+class FactualCorrectnessRequest(BaseMetricRequest):
     """Request model for factual correctness evaluation."""
-    eval_id: UUID = Field(default_factory=uuid4, examples=[str(uuid4())], description="Evaluation ID, auto-generated if not provided")
     reference: str = Field(..., examples=["Domestic and imported hepatitis B vaccines are identical in safety and efficacy"],
                            description="Ground truth reference")
     response: str = Field(..., examples=["Domestic and imported hepatitis B vaccines have no difference in safety"], description="Model-generated answer")
-    llm_config: Optional["LLMConfig"] = Field(None, description="Per-request LLM config override (model, temperature)")
 
 
 class FactualCorrectness:

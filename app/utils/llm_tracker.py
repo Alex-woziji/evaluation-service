@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Optional
 
-if TYPE_CHECKING:
-    from app.models.request import LLMConfig
+from app.models.request import LLMConfig
 
 
 @dataclass
@@ -46,11 +45,11 @@ def get_tracked_calls() -> list[LLMCallRecord]:
     return list(calls) if calls is not None else []
 
 
-def set_config_override(config: Any) -> None:
+def set_config_override(config: Optional[LLMConfig]) -> None:
     """Set per-request LLM config override for the current async context."""
     _llm_config_override.set(config)
 
 
-def get_config_override() -> Any:
+def get_config_override() -> Optional[LLMConfig]:
     """Return the current LLM config override, or None."""
     return _llm_config_override.get()

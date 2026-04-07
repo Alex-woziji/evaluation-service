@@ -28,6 +28,12 @@ class BatchEvaluateRequest(BaseModel):
     llm_config: Optional[LLMConfig] = Field(None, description="Per-request LLM config override (model, temperature)")
 
 
+class BaseMetricRequest(BaseModel):
+    """Base fields shared by all metric request models."""
+    eval_id: UUID = Field(default_factory=uuid4, description="Evaluation ID, auto-generated if not provided")
+    llm_config: Optional[LLMConfig] = Field(None, description="Per-request LLM config override (model, temperature)")
+
+
 class ValidationErrorDetail(BaseModel):
     field: str
     message: str

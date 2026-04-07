@@ -19,8 +19,17 @@ from app.models.response import (
 )
 from app.tasks.persist import persist_eval_result
 from app.utils.config import app_settings
+from app.utils.errors import ErrorCode
 from app.utils.llm_tracker import get_tracked_calls, set_config_override, start_tracking
 from app.utils.logger import get_logger
+
+# Exception → ErrorCode
+_EXCEPTION_ERROR_MAP: dict[type[Exception], ErrorCode] = {
+    openai.AuthenticationError: ErrorCode.LLM_AUTH_ERROR,
+    openai.RateLimitError: ErrorCode.LLM_RATE_LIMIT,
+    openai.APITimeoutError: ErrorCode.LLM_TIMEOUT,
+    openai.BadRequestError: ErrorCode.LLM_BAD_REQUEST,
+}
 
 logger = get_logger(__name__)
 
@@ -41,7 +50,7 @@ async def _evaluate_single(
     record: dict,
     background_tasks: BackgroundTasks,
     task_id: Optional[str] = None,
-    llm_config: Any = None,
+    llm_config: Optional[LLMConfig] = None,
 ) -> BatchItemResult:
     """Run one metric evaluation. Always returns a result, never raises."""
     evaluated_at = datetime.now(tz=timezone.utc)
@@ -53,7 +62,7 @@ async def _evaluate_single(
     except KeyError:
         return BatchItemResult(
             eval_id=eval_id, metric_name=metric_name, status="failed",
-            error="UNKNOWN_METRIC", message=f"metric '{metric_name}' not found",
+            error=ErrorCode.UNKNOWN_METRIC, message=f"metric '{metric_name}' not found",
         )
 
     # ── 2. Evaluate ─────────────────────────────────────────────────────────
@@ -62,25 +71,19 @@ async def _evaluate_single(
     set_config_override(llm_config)
     try:
         result = await metric.evaluate(**record)
-    except openai.AuthenticationError as exc:
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_AUTH_ERROR", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="LLM_AUTH_ERROR", message=str(exc))
-    except openai.RateLimitError as exc:
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_RATE_LIMIT", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="LLM_RATE_LIMIT", message=str(exc))
-    except openai.APITimeoutError as exc:
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_TIMEOUT", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="LLM_TIMEOUT", message=str(exc))
-    except openai.BadRequestError as exc:
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "LLM_BAD_REQUEST", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="LLM_BAD_REQUEST", message=str(exc))
-    except ValueError as exc:
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "METRIC_ERROR", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="METRIC_ERROR", message=str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error for eval_id=%s", eval_id)
-        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, "INTERNAL_ERROR", str(exc), task_id=task_id)
-        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error="INTERNAL_ERROR", message="An unexpected error occurred")
+        error_code = ErrorCode.INTERNAL_ERROR
+        for exc_type, code in _EXCEPTION_ERROR_MAP.items():
+            if isinstance(exc, exc_type):
+                error_code = code
+                break
+        if isinstance(exc, ValueError):
+            error_code = ErrorCode.METRIC_ERROR
+        if error_code == ErrorCode.INTERNAL_ERROR:
+            logger.exception("Unexpected error for eval_id=%s", eval_id)
+        msg = "An unexpected error occurred" if error_code == ErrorCode.INTERNAL_ERROR else str(exc)
+        _persist_failure(background_tasks, eval_id, evaluator_type, metric_name, evaluated_at, error_code, str(exc), task_id=task_id)
+        return BatchItemResult(eval_id=eval_id, metric_name=metric_name, status="failed", error=error_code, message=msg)
     finally:
         set_config_override(None)
 
@@ -157,8 +160,9 @@ def _build_handler(eval_type: str, metric_name: str, req_model):
         item = await _evaluate_single(eval_type, metric_name, eval_id, data, background_tasks, llm_config=request.llm_config)
 
         if item.status == "failed":
+            code = ErrorCode(item.error) if isinstance(item.error, str) else item.error
             _make_error(
-                {"LLM_AUTH_ERROR": 500, "LLM_RATE_LIMIT": 503, "LLM_TIMEOUT": 504, "LLM_BAD_REQUEST": 400}.get(item.error, 500),
+                code.http_status,
                 item.error, item.message, eval_id=eval_id,
             )
 
@@ -241,7 +245,7 @@ async def batch_evaluate(
         resolved.append((eval_type, name, _extract_metric_fields(metric, test_case)))
 
     if errors:
-        _make_error(422, "VALIDATION_ERROR", "Invalid metrics or missing fields", detail=errors)
+        _make_error(422, ErrorCode.VALIDATION_ERROR, "Invalid metrics or missing fields", detail=errors)
 
     # ── 2. Run all metrics concurrently ─────────────────────────────────────
     async def _run_one(eval_type: str, metric_name: str, record: dict) -> BatchItemResult:

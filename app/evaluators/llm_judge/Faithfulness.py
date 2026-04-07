@@ -9,7 +9,7 @@ from app.utils.constants import PROMPT_DIR
 from app.utils.logger import get_logger
 from app.utils.llm_utils import call_llm
 
-from app.models.request import LLMConfig
+from app.models.request import BaseMetricRequest, LLMConfig
 
 with open(PROMPT_DIR, "r", encoding="utf-8") as f:
     _prompt_config = yaml.safe_load(f)
@@ -47,13 +47,11 @@ class NLIStatementOutput(BaseModel):
 
 # ---------- Metric ----------
 
-class FaithfulnessRequest(BaseModel):
+class FaithfulnessRequest(BaseMetricRequest):
     """Request model for faithfulness evaluation."""
-    eval_id: UUID = Field(default_factory=uuid4, examples=[str(uuid4())], description="Evaluation ID, auto-generated if not provided")
     response: str = Field(..., examples=["Gradient descent is an optimization algorithm"], description="Model-generated answer")
     retrieved_contexts: str = Field(..., examples=["Gradient Descent is an optimization algorithm used to minimize a loss function"], description="Retrieved context")
     user_input: Optional[str] = Field(None, examples=["Please explain gradient descent"], description="Original user question")
-    llm_config: Optional["LLMConfig"] = Field(None, description="Per-request LLM config override (model, temperature)")
 
 
 class Faithfulness:
