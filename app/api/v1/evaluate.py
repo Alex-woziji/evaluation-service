@@ -21,7 +21,7 @@ from app.tasks.persist import persist_eval_result
 from app.utils.config import app_settings
 from app.utils.errors import ErrorCode
 from app.utils.llm_tracker import get_tracked_calls, set_config_override, start_tracking
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, set_request_id
 
 # Exception → ErrorCode
 _EXCEPTION_ERROR_MAP: dict[type[Exception], ErrorCode] = {
@@ -54,6 +54,8 @@ async def _evaluate_single(
 ) -> BatchItemResult:
     """Run one metric evaluation. Always returns a result, never raises."""
     evaluated_at = datetime.now(tz=timezone.utc)
+    set_request_id(str(eval_id))
+    logger.info("metric=%s eval_id=%s — starting evaluation", metric_name, eval_id)
 
     # ── 1. Resolve ──────────────────────────────────────────────────────────
     try:
@@ -94,6 +96,9 @@ async def _evaluate_single(
     result_data = result if isinstance(result, dict) else {}
     score = result_data.get("score")
     reason = result_data.get("reason")
+
+    logger.info("metric=%s eval_id=%s score=%s latency=%.3fs llm_calls=%d",
+                metric_name, eval_id, score, latency_s, len(llm_calls))
 
     # ── 4. Persist ──────────────────────────────────────────────────────────
     background_tasks.add_task(
@@ -247,17 +252,20 @@ async def batch_evaluate(
     if errors:
         _make_error(422, ErrorCode.VALIDATION_ERROR, "Invalid metrics or missing fields", detail=errors)
 
-    # ── 2. Run all metrics concurrently ─────────────────────────────────────
+    # ── 2. Run all metrics concurrently (with concurrency cap) ───────────────
+    sem = asyncio.Semaphore(app_settings.batch_max_concurrency)
+
     async def _run_one(eval_type: str, metric_name: str, record: dict) -> BatchItemResult:
-        return await _evaluate_single(
-            evaluator_type=eval_type,
-            metric_name=metric_name,
-            eval_id=uuid4(),
-            record=record,
-            background_tasks=background_tasks,
-            task_id=task_id,
-            llm_config=request.llm_config,
-        )
+        async with sem:
+            return await _evaluate_single(
+                evaluator_type=eval_type,
+                metric_name=metric_name,
+                eval_id=uuid4(),
+                record=record,
+                background_tasks=background_tasks,
+                task_id=task_id,
+                llm_config=request.llm_config,
+            )
 
     results = await asyncio.gather(
         *[_run_one(t, n, r) for t, n, r in resolved]

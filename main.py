@@ -7,13 +7,11 @@ import uvicorn
 
 from app.api.v1.evaluate import router as eval_router
 from app.utils.config import app_settings
+from app.utils.logger import get_logger
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    stream=sys.stdout,
-    level=getattr(logging, app_settings.log_level.upper(), logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+get_logger(__name__)  # initialise root handler + JSON formatter
+logging.getLogger().setLevel(getattr(logging, app_settings.log_level.upper(), logging.INFO))
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(

@@ -36,6 +36,7 @@ class AppSettings(BaseSettings):
 
     log_level: str = "INFO"
     app_version: str = "2.0.0"
+    batch_max_concurrency: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

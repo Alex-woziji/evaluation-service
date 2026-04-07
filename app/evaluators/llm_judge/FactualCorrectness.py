@@ -50,7 +50,7 @@ class FactualCorrectness:
         self.beta = beta
 
     async def decompose_claims(self, user_input: str, split_level: str):
-        logger.info("Starting decompose claims for FactualCorrectness")
+        logger.debug("Starting decompose claims for FactualCorrectness")
         metric_prompt = _prompt_config["FactualCorrectness"]
         instruction = metric_prompt["Instruction"].strip("\n")
         messages = [{"role": "system", "content": instruction}]

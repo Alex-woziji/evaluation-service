@@ -64,7 +64,7 @@ class Faithfulness:
 
     async def create_statement(self, response: str, user_input: str | None = None):
         """Break answer into standalone statements."""
-        logger.info("Starting statement extraction for faithfulness evaluation")
+        logger.debug("Starting statement extraction for faithfulness evaluation")
         metric_prompt = _prompt_config["FAITHFULNESS"]["Statements"]
 
         concat_data: dict = {"answer": response}
@@ -77,8 +77,8 @@ class Faithfulness:
 
     async def create_verdict(self, retrieved_contexts: str, statements):
         """Judge each statement against the context."""
-        logger.info("Starting verdict generation for faithfulness evaluation")
-        logger.info("Num of statements: %d", len(statements))
+        logger.debug("Starting verdict generation for faithfulness evaluation")
+        logger.debug("Num of statements: %d", len(statements))
 
         metric_prompt = _prompt_config["FAITHFULNESS"]["Verdicts"]
         context_statement_data = {"context": retrieved_contexts, "statements": statements}
